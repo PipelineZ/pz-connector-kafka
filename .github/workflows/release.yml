@@ -48,6 +48,22 @@ jobs:
             dotnet publish src/Pz.Connector.Kafka -c Release -r "$rid" -p:PzPackaging=self-contained --no-restore
           done
           dotnet pack src/Pz.Connector.Kafka -c Release -o packages -p:PzPackaging=self-contained
+      # The manifest is what `pz restore` reads: a wrong runtime, name, anchor or capability set, or
+      # a RID whose entrypoint never made it into the pack, is only discovered by whoever installs
+      # the release. Assert it here, while the push has not happened and a version can still be
+      # skipped -- a pushed nuget.org version cannot be replaced.
+      - name: Assert the packed manifest before publishing
+        run: |
+          set -euo pipefail
+          VERSION="$(ls packages/Pz.Connector.Kafka.*.nupkg | sed -E 's|.*/Pz\.Connector\.Kafka\.(.*)\.nupkg|\1|')"
+          unzip -p "packages/Pz.Connector.Kafka.${VERSION}.nupkg" pz.connector.json | tee manifest.json
+          grep -q '"runtime": "process"' manifest.json
+          grep -q '"name": "kafka"' manifest.json
+          grep -q '"projectDirectoryAnchor": true' manifest.json
+          grep -q '"SyncState"' manifest.json
+          for rid in linux-x64 linux-arm64 osx-arm64 win-x64; do
+            grep -q "\"${rid}\":" manifest.json
+          done
       - name: NuGet login (trusted publishing)
         id: login
         uses: NuGet/login@v1

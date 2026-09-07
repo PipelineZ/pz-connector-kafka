@@ -8,7 +8,10 @@ namespace Pz.Connector.Kafka;
 /// <summary>One idempotent producer per session. Every row's key/value/headers are fresh byte
 /// arrays built before Produce returns, so nothing from the engine-owned batch outlives the call.
 /// Back-pressure: a full local queue polls delivery reports and retries the same row -- rows are
-/// never dropped and the queue never grows past librdkafka's own bound. The first failed delivery
+/// never dropped and the queue never grows past librdkafka's own bound. That retry loop always
+/// ends: it checks the cancellation token every iteration, and a queue that never drains ages its
+/// oldest message out at librdkafka's own message.timeout.ms, which arrives as a failed delivery
+/// report that the in-loop check raises as a transient refusal. The first failed delivery
 /// report is remembered and thrown by the next WriteBatchAsync or by CommitAsync, whichever comes
 /// first; Commit also fails when Flush leaves anything outstanding.
 ///
@@ -161,12 +164,17 @@ internal sealed class KafkaWriteSession : ISinkWriteSession
             }
             catch (ProduceException<byte[], byte[]> ex) when (ex.Error.Code == ErrorCode.Local_QueueFull)
             {
+                // The two exits from this retry: a cancelled token, and a delivery report -- a queue
+                // that stays full ages its oldest message out at message.timeout.ms and reports
+                // Local_MsgTimedOut, which ThrowIfDeliveryFailed raises here as transient.
                 _producer.Poll(QueueFullBackoff);
                 ThrowIfDeliveryFailed();
                 ct.ThrowIfCancellationRequested();
             }
-            catch (ProduceException<byte[], byte[]> ex)
+            catch (KafkaException ex)
             {
+                // KafkaException, not just its ProduceException subclass: a rejected message can
+                // fail with either, and an unwrapped one carries librdkafka's reason out unredacted.
                 throw KafkaErrors.Wrap(ex, _redactor, $"topic '{_output.Topic}': producing");
             }
         }

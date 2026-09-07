@@ -87,9 +87,13 @@ public sealed class KafkaConnector : IConnector, ISourceConnector, ISinkConnecto
             }, ct).ConfigureAwait(false);
             return new ConnectionCheck(true, $"{brokers} broker(s)");
         }
-        catch (KafkaException ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return new ConnectionCheck(false, connection.Redactor.Redact($"{ex.Error.Code}: {ex.Error.Reason}"));
+            // Every failure is a failed probe, never a crash: a `client:` property librdkafka
+            // refuses throws out of the builder as an ArgumentException, and reporting it is the
+            // whole point of the check. Cancellation is not a probe result and still propagates.
+            return new ConnectionCheck(false, connection.Redactor.Redact(
+                ex is KafkaException kafka ? $"{kafka.Error.Code}: {kafka.Error.Reason}" : ex.Message));
         }
     }
 

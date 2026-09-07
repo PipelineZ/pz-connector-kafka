@@ -31,7 +31,7 @@ internal sealed class EnvelopeBatchBuilder
     private readonly ArrowBatchBuilder _inner;
     private readonly PayloadEncoding _encoding;
     private readonly KafkaRedactor _redactor;
-    private readonly object?[] _row = new object?[7];
+    private readonly object?[] _row = new object?[Schema.FieldsList.Count];
 
     public EnvelopeBatchBuilder(PayloadEncoding encoding, BatchOptions options, KafkaRedactor redactor)
     {

@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using Apache.Arrow;
 using Apache.Arrow.Types;
 using Pz.Connectors.Abstractions;
@@ -101,6 +102,18 @@ public sealed class EnvelopeBatchBuilderTests
         ]);
 
         Assert.Equal("{\"a\":[\"1\",\"2\"],\"b\":null,\"c\":\"base64:/w==\"}", json);
+    }
+
+    [Fact]
+    public void Header_names_and_values_are_json_escaped()
+    {
+        const string Name = "a\"b\\c";
+        const string Value = "v\"1\\2";
+
+        var json = EnvelopeBatchBuilder.HeadersToJson([new(Name, Encoding.UTF8.GetBytes(Value))]);
+
+        using var parsed = JsonDocument.Parse(json);
+        Assert.Equal(Value, parsed.RootElement.GetProperty(Name).GetString());
     }
 
     [Fact]

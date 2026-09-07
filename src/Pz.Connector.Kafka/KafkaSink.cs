@@ -1,13 +1,15 @@
 using System.Diagnostics.CodeAnalysis;
 using Apache.Arrow;
+using Confluent.Kafka;
 using Microsoft.Extensions.Logging;
 using Pz.Connectors.Abstractions;
 
 namespace Pz.Connector.Kafka;
 
 /// <summary>Append-only produce. No native copy (DuckDB cannot speak the Kafka protocol) and
-/// <see cref="AbortSemantics.None"/>: a produced record cannot be unsent, so abort only stops
-/// further deliveries.</summary>
+/// <see cref="AbortSemantics.None"/>: a produced record cannot be unsent, so abort refuses further
+/// writes and flushes what is already queued -- an aborted session leaves nothing it accepted
+/// unsent, it only stops the run from handing over more.</summary>
 internal sealed class KafkaSink(KafkaConnectionConfig connection, IKafkaClientFactory factory, ILogger logger) : ISink
 {
     public AbortSemantics AbortSemantics => AbortSemantics.None;
@@ -34,7 +36,19 @@ internal sealed class KafkaSink(KafkaConnectionConfig connection, IKafkaClientFa
             throw KafkaErrors.Fatal(string.Join("; ", errors), connection.Redactor);
         }
 
-        var producer = factory.CreateProducer(connection.ClientProperties, output.Compression);
+        IProducer<byte[], byte[]> producer;
+        try
+        {
+            producer = factory.CreateProducer(connection.ClientProperties, output.Compression);
+        }
+        catch (Exception ex)
+        {
+            // librdkafka rejects a `client:` property inside the builder, quoting the value it
+            // refused; outside the try below because there is no handle to dispose yet.
+            throw KafkaErrors.Wrap(ex, connection.Redactor,
+                $"topic '{output.Topic}': building the kafka client; check `client:` properties");
+        }
+
         try
         {
             return ValueTask.FromResult<ISinkWriteSession>(new KafkaWriteSession(

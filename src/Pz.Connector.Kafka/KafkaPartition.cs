@@ -40,7 +40,7 @@ internal sealed class KafkaPartition(
         var groupId = connection.GroupId ?? "pz-" + Guid.NewGuid().ToString("N");
 
         IReadOnlyList<PartitionBound> bounds;
-        using (var consumer = factory.CreateConsumer(connection.ClientProperties, groupId))
+        using (var consumer = Build(() => factory.CreateConsumer(connection.ClientProperties, groupId), topic, redactor))
         {
             bounds = await Task.Run(() => Plan(consumer, topic, redactor), ct).ConfigureAwait(false);
         }
@@ -56,7 +56,7 @@ internal sealed class KafkaPartition(
         var headerScratch = new List<KeyValuePair<string, byte[]?>>();
         if (unfinished.Count > 0)
         {
-            using var consumer = factory.CreateConsumer(connection.ClientProperties, groupId);
+            using var consumer = Build(() => factory.CreateConsumer(connection.ClientProperties, groupId), topic, redactor);
             try
             {
                 consumer.Assign(unfinished.Values.Select(b => new TopicPartitionOffset(topic, b.Partition, new Offset(b.Resume))));
@@ -176,10 +176,26 @@ internal sealed class KafkaPartition(
         }
     }
 
+    /// <summary>librdkafka validates the whole property map inside the builder, so a `client:` value
+    /// it rejects throws out of Create* rather than out of the first call -- as a KafkaException or,
+    /// for a value it cannot even parse, an ArgumentException, either one quoting the offending
+    /// value. Every client is therefore built through the redactor.</summary>
+    private static T Build<T>(Func<T> create, string topic, KafkaRedactor redactor)
+    {
+        try
+        {
+            return create();
+        }
+        catch (Exception ex)
+        {
+            throw KafkaErrors.Wrap(ex, redactor, $"topic '{topic}': building the kafka client; check `client:` properties");
+        }
+    }
+
     private IReadOnlyList<PartitionBound> Plan(IConsumer<byte[], byte[]> consumer, string topic, KafkaRedactor redactor)
     {
         List<int> partitions;
-        using (var admin = factory.CreateAdmin(connection.ClientProperties))
+        using (var admin = Build(() => factory.CreateAdmin(connection.ClientProperties), topic, redactor))
         {
             Metadata metadata;
             try
@@ -249,12 +265,22 @@ internal sealed class KafkaPartition(
 
         try
         {
-            using var consumer = factory.CreateConsumer(connection.ClientProperties, groupId);
+            using var consumer = Build(() => factory.CreateConsumer(connection.ClientProperties, groupId), topic, connection.Redactor);
             consumer.Commit(effective.Select(e => new TopicPartitionOffset(topic, e.Key, new Offset(e.Value))));
         }
-        catch (KafkaException ex)
+        catch (Exception ex)
         {
-            logger.LogWarning("kafka: topic {Topic}: committing offsets to group failed: {Code}", topic, ex.Error.Code);
+            // Every failure, not only a broker's: building the commit consumer can throw too, and a
+            // run whose records all landed must not lose its token to a dashboard's bookkeeping.
+            // Only the classification is logged -- a raw librdkafka reason can echo a credential,
+            // and the wrapped message has already been through the redactor.
+            var failure = ex switch
+            {
+                PzConnectorException wrapped => wrapped.Message,
+                KafkaException kafka => kafka.Error.Code.ToString(),
+                _ => ex.GetType().Name,
+            };
+            logger.LogWarning("kafka: topic {Topic}: committing offsets to group failed: {Failure}", topic, failure);
         }
     }
 }

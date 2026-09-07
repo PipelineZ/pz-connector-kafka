@@ -36,11 +36,15 @@ events:
     key_location: certs/client.key
     key_password: ${KAFKA_KEY_PASSWORD}
   client_id: pz                      # optional
-  idle_timeout: 60                   # optional, seconds without a record before a read is retried
+  idle_timeout: 60                   # optional, seconds of silence before a read or a commit fails transiently
   group_id: pz-orders                # optional; offsets are committed here after each read, for lag dashboards only
   client:                            # optional escape hatch: raw librdkafka properties
     socket.timeout.ms: 30000
 ```
+
+`idle_timeout` bounds silence in both directions: a read whose broker delivers no record for that
+long fails transiently, and so does a sink commit whose producer out-queue stops shrinking for that
+long.
 
 A `client:` key that a typed key already sets (`security.protocol`, `sasl.*`, `ssl.*.location`,
 `client.id`, `group.id`, `bootstrap.servers`) is refused: set each thing in one place. Passwords,
@@ -100,6 +104,12 @@ Without `value:`, each row becomes a JSON object of every column not named in `k
 `yyyy-MM-dd`, timestamps as `yyyy-MM-ddTHH:mm:ss.ffffffZ`, nulls as `null`. The producer is
 idempotent with `acks=all`; commit flushes and fails if any record was not acknowledged. Delivery
 across runs is at-least-once, as for every `append` output. The topic must already exist.
+
+A row whose `value:` column is null produces a record with a null value -- on a compacted topic that
+is a tombstone, deleting the key, not a skipped row. Without `value:`, the whole-row JSON carries
+only pz's type matrix -- varchar, integer, bigint, double, decimal, boolean, date, timestamp -- and a
+column of any other type is refused when the write starts, before a record is produced, naming the
+column: name a `value:` column, or drop it from the pipeline's projection.
 
 ## Development
 

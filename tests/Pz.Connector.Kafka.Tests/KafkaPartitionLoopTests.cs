@@ -102,6 +102,28 @@ public sealed class KafkaPartitionLoopTests
         Assert.Null(token);
     }
 
+    [Fact]
+    public async Task A_client_property_the_builder_rejects_fails_the_read_without_echoing_the_secret()
+    {
+        var factory = Factory(high: 1);
+        // How librdkafka refuses a `client:` value it cannot parse: out of the builder, not out of
+        // the first call, with the offending value quoted back in the message.
+        factory.CreateConsumerFailure = new ArgumentException("bad value for x: hunter2");
+        var config = new ConnectorConfig(new Dictionary<string, object?>
+        {
+            ["bootstrap_servers"] = "kafka.invalid:9092",
+            // Registered as a secret by the name heuristic, so the redactor knows the value.
+            ["client"] = new Dictionary<string, object?> { ["sasl.oauthbearer.client.secret"] = "hunter2" },
+        });
+
+        var ex = await Assert.ThrowsAsync<PzConnectorException>(
+            () => KafkaSourceBehaviorTests.ReadAsync(Connector(factory), config, Spec()));
+
+        Assert.False(ex.IsTransient);
+        Assert.DoesNotContain("hunter2", ex.Message);
+        Assert.Contains("building the kafka client", ex.Message);
+    }
+
     private static ISourceConnector Connector(FakeFactory factory) => new KafkaConnector(loggerFactory: null, factory);
 
     private static DatasetSpec Spec() => new("kafka", Topic, new Dictionary<string, object?>());
@@ -157,7 +179,12 @@ public sealed class KafkaPartitionLoopTests
     {
         public FakeConsumer Consumer { get; } = new();
 
-        public IConsumer<byte[], byte[]> CreateConsumer(IReadOnlyDictionary<string, string> properties, string groupId) => Consumer;
+        /// <summary>Set to make every CreateConsumer throw, standing in for a librdkafka builder
+        /// that rejects a property.</summary>
+        public Exception? CreateConsumerFailure { get; set; }
+
+        public IConsumer<byte[], byte[]> CreateConsumer(IReadOnlyDictionary<string, string> properties, string groupId) =>
+            CreateConsumerFailure is { } failure ? throw failure : Consumer;
 
         public IProducer<byte[], byte[]> CreateProducer(IReadOnlyDictionary<string, string> properties, string compression) =>
             throw new NotSupportedException();

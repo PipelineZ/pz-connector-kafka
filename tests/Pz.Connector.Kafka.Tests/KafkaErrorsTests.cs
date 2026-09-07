@@ -8,6 +8,7 @@ public sealed class KafkaErrorsTests
     [Theory]
     [InlineData(ErrorCode.Local_Transport, true)]
     [InlineData(ErrorCode.Local_TimedOut, true)]
+    [InlineData(ErrorCode.Local_MsgTimedOut, true)]
     [InlineData(ErrorCode.Local_AllBrokersDown, true)]
     [InlineData(ErrorCode.BrokerNotAvailable, true)]
     [InlineData(ErrorCode.LeaderNotAvailable, true)]

@@ -152,7 +152,9 @@ public sealed class KafkaSinkBehaviorTests
         await using var sink = await ((ISinkConnector)connector).OpenAsync(new ConnectorConfig(new Dictionary<string, object?>
         {
             ["bootstrap_servers"] = _broker.BootstrapServers,
-            ["client"] = new Dictionary<string, object?> { ["allow.auto.create.topics"] = false, ["message.timeout.ms"] = 5000L },
+            // Generous enough that Local_UnknownTopic (non-transient) is always the failure the
+            // commit reports, never a message timeout (transient) racing it.
+            ["client"] = new Dictionary<string, object?> { ["allow.auto.create.topics"] = false, ["message.timeout.ms"] = 30000L },
         }), CancellationToken.None);
         var missing = "pz_missing_" + Guid.NewGuid().ToString("N");
         await using var session = await sink.BeginWriteAsync(Spec(missing), Schema, CancellationToken.None);

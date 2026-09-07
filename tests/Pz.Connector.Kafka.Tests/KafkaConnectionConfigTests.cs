@@ -75,6 +75,23 @@ public sealed class KafkaConnectionConfigTests
     }
 
     [Fact]
+    public void An_already_rooted_ssl_path_ignores_base_dir()
+    {
+        var errors = new List<string>();
+        var rooted = Path.Combine(Path.GetTempPath(), "ca.pem");
+        var config = KafkaConnectionConfig.Parse(Config(new()
+        {
+            ["bootstrap_servers"] = "b:9092",
+            ["security"] = "ssl",
+            ["ssl"] = new Dictionary<string, object?> { ["ca_location"] = rooted },
+            ["base_dir"] = "/proj",
+        }), errors);
+
+        Assert.Empty(errors);
+        Assert.Equal(rooted, config!.ClientProperties["ssl.ca.location"]);
+    }
+
+    [Fact]
     public void Client_escape_hatch_passes_through_unknown_keys_and_refuses_typed_overlap()
     {
         var errors = new List<string>();
