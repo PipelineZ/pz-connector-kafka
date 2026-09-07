@@ -1,0 +1,32 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet build Pz.Connector.Kafka.slnx -c Release
+      # ubuntu has docker, so the Testcontainers broker facts run; windows cannot pull Linux images,
+      # so it runs everything that is not broker-backed.
+      - if: runner.os == 'Linux'
+        run: dotnet test Pz.Connector.Kafka.slnx -c Release --no-build --blame-hang --blame-hang-timeout 10m --blame-hang-dump-type mini
+      - if: runner.os == 'Windows'
+        run: dotnet test Pz.Connector.Kafka.slnx -c Release --no-build --filter "Category!=Docker" --blame-hang --blame-hang-timeout 10m --blame-hang-dump-type mini

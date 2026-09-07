@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <Description>Apache Kafka source (offset-resumed feed) and sink (append-only produce) connector for PipelineZ (pz), served out of process.</Description>
+    <!-- Confluent.Kafka is a P/Invoke wrapper over librdkafka with reflection-bound delegates and no
+         Native AOT support, so this connector ships as a self-contained single-file CoreCLR binary. -->
+    <PzPackaging>self-contained</PzPackaging>
+    <!-- ssl.ca_location / certificate_location / key_location are project-relative paths. -->
+    <PzProjectDirectoryAnchor>true</PzProjectDirectoryAnchor>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Pz.Connectors.Sdk" Version="0.5.0" />
+    <PackageReference Include="Pz.Connectors.Abstractions" Version="0.5.0" />
+    <PackageReference Include="Confluent.Kafka" Version="2.15.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Pz.Connector.Kafka.Tests" />
+  </ItemGroup>
+
+</Project>
