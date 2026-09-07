@@ -1,4 +1,5 @@
 using System.Reflection;
+using Confluent.Kafka;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Pz.Connectors.Abstractions;
@@ -9,9 +10,21 @@ namespace Pz.Connector.Kafka;
 /// the engine stores as the dataset's sync-state token; a sink output is an append-only produce.
 /// Capabilities: <see cref="ConnectorCapabilities.SyncState"/> only -- one token per dataset means
 /// one pz partition per dataset, and there is no SQL fragment DuckDB could scan a broker with.</summary>
-public sealed class KafkaConnector(ILoggerFactory? loggerFactory = null) : IConnector, ISourceConnector, ISinkConnector
+public sealed class KafkaConnector : IConnector, ISourceConnector, ISinkConnector
 {
-    private readonly ILoggerFactory _loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
+    private readonly ILoggerFactory _loggerFactory;
+    private readonly IKafkaClientFactory _factory;
+
+    public KafkaConnector(ILoggerFactory? loggerFactory = null)
+        : this(loggerFactory, KafkaClientFactory.Instance)
+    {
+    }
+
+    internal KafkaConnector(ILoggerFactory? loggerFactory, IKafkaClientFactory factory)
+    {
+        _loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
+        _factory = factory;
+    }
 
     public ConnectorInfo Info { get; } = new(
         "kafka",
@@ -56,12 +69,43 @@ public sealed class KafkaConnector(ILoggerFactory? loggerFactory = null) : IConn
         return ValueTask.FromResult(errors.Count == 0 ? ValidationResult.Success : new ValidationResult(errors));
     }
 
-    public ValueTask<ConnectionCheck> CheckConnectionAsync(ConnectorConfig config, CancellationToken ct) =>
-        ValueTask.FromResult(new ConnectionCheck(false, "not implemented yet"));
+    public async ValueTask<ConnectionCheck> CheckConnectionAsync(ConnectorConfig config, CancellationToken ct)
+    {
+        var errors = new List<string>();
+        var connection = KafkaConnectionConfig.Parse(config, errors);
+        if (connection is null)
+        {
+            return new ConnectionCheck(false, string.Join("; ", errors));
+        }
 
-    ValueTask<ISource> ISourceConnector.OpenAsync(ConnectorConfig config, CancellationToken ct) =>
-        throw new NotImplementedException();
+        try
+        {
+            var brokers = await Task.Run(() =>
+            {
+                using var admin = _factory.CreateAdmin(connection.ClientProperties);
+                return admin.GetMetadata(TimeSpan.FromSeconds(10)).Brokers.Count;
+            }, ct).ConfigureAwait(false);
+            return new ConnectionCheck(true, $"{brokers} broker(s)");
+        }
+        catch (KafkaException ex)
+        {
+            return new ConnectionCheck(false, connection.Redactor.Redact($"{ex.Error.Code}: {ex.Error.Reason}"));
+        }
+    }
+
+    ValueTask<ISource> ISourceConnector.OpenAsync(ConnectorConfig config, CancellationToken ct)
+    {
+        var connection = ParseOrThrow(config);
+        return ValueTask.FromResult<ISource>(new KafkaSource(connection, _factory, _loggerFactory.CreateLogger<KafkaSource>()));
+    }
 
     ValueTask<ISink> ISinkConnector.OpenAsync(ConnectorConfig config, CancellationToken ct) =>
         throw new NotImplementedException();
+
+    private static KafkaConnectionConfig ParseOrThrow(ConnectorConfig config)
+    {
+        var errors = new List<string>();
+        return KafkaConnectionConfig.Parse(config, errors)
+            ?? throw new PzConnectorException("kafka: invalid connection config: " + string.Join("; ", errors), isTransient: false);
+    }
 }
