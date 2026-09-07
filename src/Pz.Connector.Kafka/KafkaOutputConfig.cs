@@ -72,20 +72,17 @@ internal sealed record KafkaOutputConfig(
             }
         }
 
-        // Array.Empty<string>() is a cached singleton, so an empty-headers config compares equal
-        // (record equality on IReadOnlyList<string> falls back to reference equality) to a literal
-        // `[]` default, which the compiler also lowers to that same singleton.
-        var headerColumns = headers.Count == 0 ? System.Array.Empty<string>() : headers.ToArray();
-        return errors.Count == start ? new KafkaOutputConfig(topic, key, value, headerColumns, compression) : null;
+        return errors.Count == start ? new KafkaOutputConfig(topic, key, value, headers.ToArray(), compression) : null;
     }
 
-    public void ValidateAgainst(Schema schema, List<string> errors)
+    public void ValidateAgainst(string output, Schema schema, List<string> errors)
     {
-        Check(schema, "key", KeyColumn, KeyTypes, errors);
-        Check(schema, "value", ValueColumn, [ArrowTypeId.String], errors);
+        var prefix = $"output '{output}'";
+        Check(prefix, schema, "key", KeyColumn, KeyTypes, errors);
+        Check(prefix, schema, "value", ValueColumn, [ArrowTypeId.String], errors);
         foreach (var header in HeaderColumns)
         {
-            Check(schema, "headers", header, HeaderTypes, errors);
+            Check(prefix, schema, "headers", header, HeaderTypes, errors);
         }
     }
 
@@ -106,6 +103,32 @@ internal sealed record KafkaOutputConfig(
         return Enumerable.Range(0, fields.Count).Where(i => !excluded.Contains(fields[i].Name)).ToArray();
     }
 
+    // HeaderColumns is an IReadOnlyList<string>: compiler-generated record equality compares it by
+    // reference (List<T>/arrays don't override Equals), so two configs parsed from separately built
+    // header lists would never compare equal. Give the record real value equality instead.
+    public bool Equals(KafkaOutputConfig? other) =>
+        other is not null
+        && Topic == other.Topic
+        && KeyColumn == other.KeyColumn
+        && ValueColumn == other.ValueColumn
+        && Compression == other.Compression
+        && HeaderColumns.SequenceEqual(other.HeaderColumns, StringComparer.Ordinal);
+
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        hash.Add(Topic);
+        hash.Add(KeyColumn);
+        hash.Add(ValueColumn);
+        hash.Add(Compression);
+        foreach (var header in HeaderColumns)
+        {
+            hash.Add(header);
+        }
+
+        return hash.ToHashCode();
+    }
+
     private static string? Name(OutputSpec spec, string option, string prefix, List<string> errors)
     {
         if (!spec.Options.TryGetValue(option, out var raw) || raw is null)
@@ -123,7 +146,7 @@ internal sealed record KafkaOutputConfig(
         return name;
     }
 
-    private static void Check(Schema schema, string option, string? column, ArrowTypeId[] allowed, List<string> errors)
+    private static void Check(string prefix, Schema schema, string option, string? column, ArrowTypeId[] allowed, List<string> errors)
     {
         if (column is null)
         {
@@ -133,11 +156,11 @@ internal sealed record KafkaOutputConfig(
         var field = schema.FieldsList.FirstOrDefault(f => f.Name == column);
         if (field is null)
         {
-            errors.Add($"'{option}' names column '{column}', which the pipeline does not produce");
+            errors.Add($"{prefix}: '{option}' names column '{column}', which the pipeline does not produce");
         }
         else if (!allowed.Contains(field.DataType.TypeId))
         {
-            errors.Add($"'{option}' column '{column}' is {field.DataType.TypeId}; allowed: {string.Join(", ", allowed)}");
+            errors.Add($"{prefix}: '{option}' column '{column}' is {field.DataType.TypeId}; allowed: {string.Join(", ", allowed)}");
         }
     }
 }

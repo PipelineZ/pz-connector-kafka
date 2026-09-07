@@ -39,10 +39,20 @@ public sealed class KafkaOutputConfigTests
         }), errors);
 
         Assert.Empty(errors);
-        config!.ValidateAgainst(Schema, errors);
+        config!.ValidateAgainst("order-events", Schema, errors);
         Assert.Empty(errors);
         Assert.Equal([1, 3, 4], config.JsonColumnIndexes(Schema));
         Assert.Equal("zstd", config.Compression);
+    }
+
+    [Fact]
+    public void Configs_parsed_from_separately_built_header_lists_compare_equal()
+    {
+        var errors = new List<string>();
+        var a = KafkaOutputConfig.Parse(Spec(new() { ["headers"] = new List<object?> { "src", "id" } }), errors);
+        var b = KafkaOutputConfig.Parse(Spec(new() { ["headers"] = new List<object?> { "src", "id" } }), errors);
+
+        Assert.Equal(a, b);
     }
 
     [Fact]
@@ -51,7 +61,7 @@ public sealed class KafkaOutputConfigTests
         var errors = new List<string>();
         var config = KafkaOutputConfig.Parse(Spec(new() { ["value"] = "payload", ["key"] = "id" }), errors);
 
-        config!.ValidateAgainst(Schema, errors);
+        config!.ValidateAgainst("order-events", Schema, errors);
         Assert.Empty(errors);
         Assert.Empty(config.JsonColumnIndexes(Schema));
     }
@@ -82,9 +92,10 @@ public sealed class KafkaOutputConfigTests
             ["key"] = "amount", ["value"] = "id", ["headers"] = new List<object?> { "missing", "amount" },
         }), errors)!;
 
-        config.ValidateAgainst(Schema, errors);
+        config.ValidateAgainst("order-events", Schema, errors);
 
         Assert.Equal(4, errors.Count);
+        Assert.All(errors, e => Assert.Contains("output 'order-events':", e));
         Assert.Contains(errors, e => e.Contains("'key'") && e.Contains("amount") && e.Contains("Double"));
         Assert.Contains(errors, e => e.Contains("'value'") && e.Contains("id") && e.Contains("String"));
         Assert.Contains(errors, e => e.Contains("'headers'") && e.Contains("missing"));
