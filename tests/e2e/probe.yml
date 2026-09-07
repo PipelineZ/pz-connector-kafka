@@ -1,8 +1,7 @@
 connection:
-  # `pz connector test --config` loads this file straight through YamlMapper.LoadFile with no
-  # ${VAR} interpolation (that's a connections.yml/project-loading feature only), so this must be the
-  # literal address -- matching the CI job's KAFKA_BOOTSTRAP=localhost:9092 broker port-forward.
-  bootstrap_servers: localhost:9092
+  # Interpolated from the environment by `pz connector test --config`, the same way connections.yml
+  # is: the CI job exports KAFKA_BOOTSTRAP for both.
+  bootstrap_servers: ${KAFKA_BOOTSTRAP}
 read:
   dataset: e2e-in
 write:

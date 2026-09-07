@@ -31,12 +31,6 @@ jobs:
       - run: dotnet test Pz.Connector.Kafka.slnx -c Release --no-build --blame-hang --blame-hang-timeout 10m --blame-hang-dump-type mini
       # One self-contained single-file publish per RID the package ships; pack collects them all
       # (the SDK's PzRuntimeIdentifiers default) and writes the manifest by running the linux-x64 binary.
-      # -p:PzPackaging=self-contained works around a NuGet package-props import-order gap in
-      # Pz.Connectors.Sdk 0.5.0: its build/Pz.Connectors.Sdk.props sets PublishAot/PublishSingleFile
-      # from file-level PropertyGroups conditioned on PzPackaging, which are evaluated (via
-      # Microsoft.Common.props' nuget.g.props import) BEFORE this project's own <PzPackaging> is read,
-      # so the props file's own 'aot' default wins unless PzPackaging also arrives as a global (-p:)
-      # property, which is evaluated first and cannot be overridden later.
       # A separate `restore -r` before `publish -r --no-restore` is required on a cold NuGet cache:
       # the restore folded into `publish -r` alone does not pull the RID-specific
       # Microsoft.NETCore.App.Runtime/Microsoft.AspNetCore.App.Runtime packs this self-contained
@@ -44,10 +38,10 @@ jobs:
       - run: |
           set -euo pipefail
           for rid in linux-x64 linux-arm64 osx-arm64 win-x64; do
-            dotnet restore src/Pz.Connector.Kafka -r "$rid" -p:PzPackaging=self-contained
-            dotnet publish src/Pz.Connector.Kafka -c Release -r "$rid" -p:PzPackaging=self-contained --no-restore
+            dotnet restore src/Pz.Connector.Kafka -r "$rid"
+            dotnet publish src/Pz.Connector.Kafka -c Release -r "$rid" --no-restore
           done
-          dotnet pack src/Pz.Connector.Kafka -c Release -o packages -p:PzPackaging=self-contained
+          dotnet pack src/Pz.Connector.Kafka -c Release -o packages
       # The manifest is what `pz restore` reads: a wrong runtime, name, anchor or capability set, or
       # a RID whose entrypoint never made it into the pack, is only discovered by whoever installs
       # the release. Assert it here, while the push has not happened and a version can still be
