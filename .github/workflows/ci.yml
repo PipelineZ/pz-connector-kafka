@@ -50,7 +50,13 @@ jobs:
           # Microsoft.Common.props' nuget.g.props import) BEFORE this project's own <PzPackaging> is
           # read, so the props file's own 'aot' default wins unless PzPackaging also arrives as a
           # global (-p:) property, which is evaluated first and cannot be overridden later.
-          dotnet publish src/Pz.Connector.Kafka -c Release -r linux-x64 -p:PzPackaging=self-contained
+          # A separate `restore -r` before `publish -r --no-restore` is required on a cold NuGet
+          # cache: the restore folded into `publish -r` alone does not pull the RID-specific
+          # Microsoft.NETCore.App.Runtime/Microsoft.AspNetCore.App.Runtime packs this self-contained
+          # build's FrameworkReference needs (NETSDK1112), even though the same restore run standalone
+          # does.
+          dotnet restore src/Pz.Connector.Kafka -r linux-x64 -p:PzPackaging=self-contained
+          dotnet publish src/Pz.Connector.Kafka -c Release -r linux-x64 -p:PzPackaging=self-contained --no-restore
           dotnet pack src/Pz.Connector.Kafka -c Release -o packages -p:PzPackaging=self-contained
           ls packages
           VERSION="$(ls packages/Pz.Connector.Kafka.*.nupkg | sed -E 's|.*/Pz\.Connector\.Kafka\.(.*)\.nupkg|\1|')"

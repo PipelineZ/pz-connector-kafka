@@ -114,6 +114,10 @@ dotnet pack src/Pz.Connector.Kafka -c Release -o packages -p:PzPackaging=self-co
 `Pz.Connectors.Sdk` 0.5.0 (its `PublishAot`/`PublishSingleFile` defaults are set from
 `PzPackaging`-conditioned property groups that run before this project's own `<PzPackaging>` element
 is read); passing it as a command-line global property makes it win. Drop this once a fixed SDK
-release reads `PzPackaging` correctly from the project file alone.
+release reads `PzPackaging` correctly from the project file alone. On a cold NuGet cache, restore the
+RID explicitly first (`dotnet restore src/Pz.Connector.Kafka -r linux-x64 -p:PzPackaging=self-contained`)
+before publishing with `--no-restore`; `publish -r` alone can skip pulling the RID-specific
+`Microsoft.NETCore.App.Runtime`/`Microsoft.AspNetCore.App.Runtime` packs this self-contained build's
+`FrameworkReference` needs (NETSDK1112).
 
 Releases are tag-triggered (`v*`) and publish to nuget.org through trusted publishing.

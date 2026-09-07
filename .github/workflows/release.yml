@@ -37,10 +37,15 @@ jobs:
       # Microsoft.Common.props' nuget.g.props import) BEFORE this project's own <PzPackaging> is read,
       # so the props file's own 'aot' default wins unless PzPackaging also arrives as a global (-p:)
       # property, which is evaluated first and cannot be overridden later.
+      # A separate `restore -r` before `publish -r --no-restore` is required on a cold NuGet cache:
+      # the restore folded into `publish -r` alone does not pull the RID-specific
+      # Microsoft.NETCore.App.Runtime/Microsoft.AspNetCore.App.Runtime packs this self-contained
+      # build's FrameworkReference needs (NETSDK1112), even though the same restore run standalone does.
       - run: |
           set -euo pipefail
           for rid in linux-x64 linux-arm64 osx-arm64 win-x64; do
-            dotnet publish src/Pz.Connector.Kafka -c Release -r "$rid" -p:PzPackaging=self-contained
+            dotnet restore src/Pz.Connector.Kafka -r "$rid" -p:PzPackaging=self-contained
+            dotnet publish src/Pz.Connector.Kafka -c Release -r "$rid" -p:PzPackaging=self-contained --no-restore
           done
           dotnet pack src/Pz.Connector.Kafka -c Release -o packages -p:PzPackaging=self-contained
       - name: NuGet login (trusted publishing)
