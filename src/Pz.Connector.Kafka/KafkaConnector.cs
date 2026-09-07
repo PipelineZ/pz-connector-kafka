@@ -49,8 +49,12 @@ public sealed class KafkaConnector(ILoggerFactory? loggerFactory = null) : IConn
           "additionalProperties": false }
         """;
 
-    public ValueTask<ValidationResult> ValidateAsync(ConnectorConfig config, CancellationToken ct) =>
-        ValueTask.FromResult(ValidationResult.Success);
+    public ValueTask<ValidationResult> ValidateAsync(ConnectorConfig config, CancellationToken ct)
+    {
+        var errors = new List<string>();
+        KafkaConnectionConfig.Parse(config, errors);
+        return ValueTask.FromResult(errors.Count == 0 ? ValidationResult.Success : new ValidationResult(errors));
+    }
 
     public ValueTask<ConnectionCheck> CheckConnectionAsync(ConnectorConfig config, CancellationToken ct) =>
         ValueTask.FromResult(new ConnectionCheck(false, "not implemented yet"));

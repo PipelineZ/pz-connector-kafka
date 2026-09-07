@@ -30,4 +30,15 @@ public sealed class KafkaConnectorTests
         Assert.Equal("object", connection.RootElement.GetProperty("type").GetString());
         Assert.Equal("object", dataset.RootElement.GetProperty("type").GetString());
     }
+
+    [Fact]
+    public async Task Validate_reports_every_config_error()
+    {
+        var result = await new KafkaConnector().ValidateAsync(
+            new ConnectorConfig(new Dictionary<string, object?> { ["security"] = "nope", ["idle_timeout"] = -1L }),
+            CancellationToken.None);
+
+        Assert.False(result.IsValid);
+        Assert.Equal(3, result.Errors.Count); // bootstrap_servers, security, idle_timeout
+    }
 }
