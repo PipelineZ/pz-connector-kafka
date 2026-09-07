@@ -44,7 +44,8 @@ events:
 
 `idle_timeout` bounds silence in both directions: a read whose broker delivers no record for that
 long fails transiently, and so does a sink commit whose producer out-queue stops shrinking for that
-long.
+long. The best-effort `group_id` commit after a read is given the same budget, then abandoned with
+a warning; the read's stored offsets never depend on it.
 
 A `client:` key that a typed key already sets (`security.protocol`, `sasl.*`, `ssl.*.location`,
 `client.id`, `group.id`, `bootstrap.servers`) is refused: set each thing in one place. Passwords,

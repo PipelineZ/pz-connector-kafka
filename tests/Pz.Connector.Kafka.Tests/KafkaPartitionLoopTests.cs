@@ -124,6 +124,55 @@ public sealed class KafkaPartitionLoopTests
         Assert.Contains("building the kafka client", ex.Message);
     }
 
+    [Fact]
+    public async Task A_resume_offset_retention_dropped_mid_read_fails_non_transiently_with_the_retention_wording()
+    {
+        var factory = Factory(high: 3);
+        factory.Consumer.Script.Enqueue(Record(0, offset: 0, "a"));
+        // How librdkafka reports a fetch below the low watermark under auto.offset.reset=error.
+        factory.Consumer.ConsumeFailure = new ConsumeException(
+            new ConsumeResult<byte[], byte[]> { Topic = Topic, Partition = new Partition(0), Offset = new Offset(1) },
+            new Error(ErrorCode.Local_AutoOffsetReset, "fetch failed due to requested offset not available on the broker: Broker: Offset out of range"));
+
+        var ex = await Assert.ThrowsAsync<PzConnectorException>(
+            () => KafkaSourceBehaviorTests.ReadAsync(Connector(factory), Config(), Spec()));
+
+        Assert.False(ex.IsTransient);
+        Assert.Contains("partition 0", ex.Message);
+        Assert.Contains("dropped by retention", ex.Message);
+        Assert.Contains("--full-refresh", ex.Message);
+    }
+
+    [Fact]
+    public async Task A_group_commit_that_never_answers_is_abandoned_after_the_idle_timeout_and_the_token_stands()
+    {
+        var factory = Factory(high: 1);
+        factory.Consumer.Script.Enqueue(Record(0, offset: 0, "a"));
+        // The commit blocks until the fact releases it, standing in for a coordinator lookup that
+        // librdkafka retries without end; the read must come back on the idle budget, not on it.
+        using var gate = new ManualResetEventSlim(false);
+        factory.Consumer.CommitGate = gate;
+        var values = new Dictionary<string, object?>
+        {
+            ["bootstrap_servers"] = "kafka.invalid:9092",
+            ["group_id"] = "dashboards",
+            ["idle_timeout"] = 1L,
+        };
+
+        try
+        {
+            var (rows, token) = await KafkaSourceBehaviorTests.ReadAsync(Connector(factory), new ConnectorConfig(values), Spec());
+
+            Assert.Equal(["a"], rows.Select(r => r.Value));
+            Assert.Equal($$$"""{"v":1,"topic":"{{{Topic}}}","partitions":{"0":1}}""", token);
+            Assert.Equal(1, factory.Consumer.CommitsStarted);
+        }
+        finally
+        {
+            gate.Set();
+        }
+    }
+
     private static ISourceConnector Connector(FakeFactory factory) => new KafkaConnector(loggerFactory: null, factory);
 
     private static DatasetSpec Spec() => new("kafka", Topic, new Dictionary<string, object?>());
@@ -205,6 +254,16 @@ public sealed class KafkaPartitionLoopTests
 
         public TimeSpan SilenceBeforeNull { get; set; }
 
+        /// <summary>Thrown by the first Consume call once the script is exhausted.</summary>
+        public Exception? ConsumeFailure { get; set; }
+
+        /// <summary>When set, every Commit blocks on it; <see cref="CommitsStarted"/> counts the calls.</summary>
+        public ManualResetEventSlim? CommitGate { get; set; }
+
+        public int CommitsStarted => Volatile.Read(ref _commitsStarted);
+
+        private int _commitsStarted;
+
         public int UnassignCount { get; private set; }
 
         public ConsumeResult<byte[], byte[]>? Consume(TimeSpan timeout)
@@ -212,6 +271,12 @@ public sealed class KafkaPartitionLoopTests
             if (Script.Count > 0)
             {
                 return Script.Dequeue();
+            }
+
+            if (ConsumeFailure is { } failure)
+            {
+                ConsumeFailure = null;
+                throw failure;
             }
 
             Thread.Sleep(SilenceBeforeNull);
@@ -275,7 +340,11 @@ public sealed class KafkaPartitionLoopTests
 
         public List<TopicPartitionOffset> Commit() => throw new NotSupportedException();
 
-        public void Commit(IEnumerable<TopicPartitionOffset> offsets) => throw new NotSupportedException();
+        public void Commit(IEnumerable<TopicPartitionOffset> offsets)
+        {
+            Interlocked.Increment(ref _commitsStarted);
+            CommitGate?.Wait();
+        }
 
         public void Commit(ConsumeResult<byte[], byte[]> result) => throw new NotSupportedException();
 

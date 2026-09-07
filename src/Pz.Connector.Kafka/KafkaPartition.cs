@@ -42,7 +42,7 @@ internal sealed class KafkaPartition(
         IReadOnlyList<PartitionBound> bounds;
         using (var consumer = Build(() => factory.CreateConsumer(connection.ClientProperties, groupId), topic, redactor))
         {
-            bounds = await Task.Run(() => Plan(consumer, topic, redactor), ct).ConfigureAwait(false);
+            bounds = await Task.Run(() => Plan(consumer, topic, redactor, ct), ct).ConfigureAwait(false);
         }
 
         logger.LogDebug("kafka: topic {Topic}: {Partitions} partitions, {Unfinished} with records to read",
@@ -75,6 +75,19 @@ internal sealed class KafkaPartition(
                 try
                 {
                     result = consumer.Consume(PollInterval);
+                }
+                catch (KafkaException ex) when (ex.Error.Code is ErrorCode.OffsetOutOfRange or ErrorCode.Local_AutoOffsetReset)
+                {
+                    // auto.offset.reset=error turns a resume offset the broker no longer holds into
+                    // a Local_AutoOffsetReset (wrapping the broker's OffsetOutOfRange) instead of a
+                    // silent jump to the earliest: retention ran between the plan-time watermark
+                    // query and the fetch. The same refusal, and the same remedy, as a stored
+                    // offset already below the low watermark at plan time.
+                    var lost = (ex as ConsumeException)?.ConsumerRecord?.Partition.Value;
+                    throw KafkaErrors.Fatal(
+                        $"topic '{topic}'{(lost is { } lp ? $": partition {lp}" : "")}: the resume offset is no longer " +
+                        "available on the broker, so records were dropped by retention before this run landed them; " +
+                        "recover with `pz run --full-refresh` or edit the dataset's state with `pz state`", redactor);
                 }
                 catch (KafkaException ex)
                 {
@@ -192,7 +205,7 @@ internal sealed class KafkaPartition(
         }
     }
 
-    private IReadOnlyList<PartitionBound> Plan(IConsumer<byte[], byte[]> consumer, string topic, KafkaRedactor redactor)
+    private IReadOnlyList<PartitionBound> Plan(IConsumer<byte[], byte[]> consumer, string topic, KafkaRedactor redactor, CancellationToken ct)
     {
         List<int> partitions;
         using (var admin = Build(() => factory.CreateAdmin(connection.ClientProperties), topic, redactor))
@@ -227,6 +240,9 @@ internal sealed class KafkaPartition(
         {
             foreach (var p in partitions)
             {
+                // Each query is its own bounded round trip; a wide topic on a slow broker is the
+                // one place planning can outlive a cancellation by minutes.
+                ct.ThrowIfCancellationRequested();
                 var wm = consumer.QueryWatermarkOffsets(new TopicPartition(topic, p), MetadataTimeout);
                 watermarks.Add(new PartitionWatermarks(p, wm.Low.Value, wm.High.Value));
             }
@@ -255,7 +271,11 @@ internal sealed class KafkaPartition(
     }
 
     /// <summary>Best effort, only when the user configured a group: the landed read must never fail
-    /// because a lag dashboard's bookkeeping did.</summary>
+    /// because a lag dashboard's bookkeeping did, nor wait on it past the connection's idle timeout.
+    /// A synchronous commit against a coordinator that stopped answering blocks for as long as
+    /// librdkafka keeps retrying the lookup, so the commit runs on its own thread and the read
+    /// returns when the budget is spent; the thread then disposes the consumer whenever the
+    /// commit finally settles.</summary>
     private void CommitForDashboards(string topic, IReadOnlyDictionary<int, long> effective, string groupId)
     {
         if (connection.GroupId is null)
@@ -263,23 +283,40 @@ internal sealed class KafkaPartition(
             return;
         }
 
-        try
+        var offsets = effective.Select(e => new TopicPartitionOffset(topic, e.Key, new Offset(e.Value))).ToList();
+        var commit = Task.Run(() =>
         {
             using var consumer = Build(() => factory.CreateConsumer(connection.ClientProperties, groupId), topic, connection.Redactor);
-            consumer.Commit(effective.Select(e => new TopicPartitionOffset(topic, e.Key, new Offset(e.Value))));
+            consumer.Commit(offsets);
+        });
+
+        string? failure = null;
+        try
+        {
+            if (!commit.Wait(TimeSpan.FromSeconds(connection.IdleTimeoutSeconds)))
+            {
+                failure = $"no answer from the group coordinator for {connection.IdleTimeoutSeconds}s";
+                // Whatever the abandoned commit eventually raises is already accounted for here.
+                _ = commit.ContinueWith(static t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
+            }
         }
-        catch (Exception ex)
+        catch (AggregateException ex)
         {
             // Every failure, not only a broker's: building the commit consumer can throw too, and a
             // run whose records all landed must not lose its token to a dashboard's bookkeeping.
             // Only the classification is logged -- a raw librdkafka reason can echo a credential,
             // and the wrapped message has already been through the redactor.
-            var failure = ex switch
+            failure = ex.InnerException switch
             {
                 PzConnectorException wrapped => wrapped.Message,
                 KafkaException kafka => kafka.Error.Code.ToString(),
-                _ => ex.GetType().Name,
+                { } inner => inner.GetType().Name,
+                null => ex.GetType().Name,
             };
+        }
+
+        if (failure is not null)
+        {
             logger.LogWarning("kafka: topic {Topic}: committing offsets to group failed: {Failure}", topic, failure);
         }
     }
