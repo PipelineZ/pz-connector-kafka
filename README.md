@@ -118,18 +118,13 @@ column: name a `value:` column, or drop it from the pipeline's projection.
 ```bash
 dotnet build Pz.Connector.Kafka.slnx -c Release
 dotnet test Pz.Connector.Kafka.slnx -c Release --no-build                                  # broker facts need docker; they SKIP without it
-dotnet publish src/Pz.Connector.Kafka -c Release -r linux-x64 -p:PzPackaging=self-contained # stage the host RID
-dotnet pack src/Pz.Connector.Kafka -c Release -o packages -p:PzPackaging=self-contained     # nupkg with pz.connector.json
+dotnet publish src/Pz.Connector.Kafka -c Release -r linux-x64                               # stage the host RID
+dotnet pack src/Pz.Connector.Kafka -c Release -o packages                                  # nupkg with pz.connector.json
 ```
 
-`-p:PzPackaging=self-contained` works around a package-props evaluation-order gap in
-`Pz.Connectors.Sdk` 0.5.0 (its `PublishAot`/`PublishSingleFile` defaults are set from
-`PzPackaging`-conditioned property groups that run before this project's own `<PzPackaging>` element
-is read); passing it as a command-line global property makes it win. Drop this once a fixed SDK
-release reads `PzPackaging` correctly from the project file alone. On a cold NuGet cache, restore the
-RID explicitly first (`dotnet restore src/Pz.Connector.Kafka -r linux-x64 -p:PzPackaging=self-contained`)
-before publishing with `--no-restore`; `publish -r` alone can skip pulling the RID-specific
-`Microsoft.NETCore.App.Runtime`/`Microsoft.AspNetCore.App.Runtime` packs this self-contained build's
-`FrameworkReference` needs (NETSDK1112).
+On a cold NuGet cache, restore the RID explicitly first (`dotnet restore src/Pz.Connector.Kafka -r
+linux-x64`) before publishing with `--no-restore`; `publish -r` alone can skip pulling the
+RID-specific `Microsoft.NETCore.App.Runtime`/`Microsoft.AspNetCore.App.Runtime` packs this
+self-contained build's `FrameworkReference` needs (NETSDK1112).
 
 Releases are tag-triggered (`v*`) and publish to nuget.org through trusted publishing.
