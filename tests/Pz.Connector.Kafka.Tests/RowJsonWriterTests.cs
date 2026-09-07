@@ -1,3 +1,4 @@
+using System.Data.SqlTypes;
 using System.Text;
 using Apache.Arrow;
 using Apache.Arrow.Types;
@@ -45,6 +46,18 @@ public sealed class RowJsonWriterTests
         Assert.Equal(
             """{"i32":7,"i64":9000000000,"f64":1.5,"dec":"12.345000000","s":"he said \"hi\"","b":true,"d":"2026-09-07","ts":"2026-09-07T10:11:12.123456Z"}""",
             json);
+    }
+
+    [Fact]
+    public void A_decimal_wider_than_system_decimal_keeps_every_digit()
+    {
+        var schema = new Schema([new Field("dec", new Decimal128Type(38, 9), true)], null);
+        var wide = SqlDecimal.Parse("12345678901234567890123456789.123456789");
+        using var batch = new RecordBatch(schema, [new Decimal128Array.Builder(new Decimal128Type(38, 9)).Append(wide).Build()], 1);
+        var writer = new RowJsonWriter(schema, [0]);
+
+        Assert.Equal("""{"dec":"12345678901234567890123456789.123456789"}""", Encoding.UTF8.GetString(writer.Write(batch, 0)));
+        Assert.Equal("12345678901234567890123456789.123456789", ArrowScalars.Format(batch.Column(0), 0));
     }
 
     [Fact]

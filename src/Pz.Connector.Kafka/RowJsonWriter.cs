@@ -73,7 +73,12 @@ internal static class ArrowScalars
             Int32Array a => a.GetValue(row)!.Value.ToString(CultureInfo.InvariantCulture),
             Int64Array a => a.GetValue(row)!.Value.ToString(CultureInfo.InvariantCulture),
             DoubleArray a => a.GetValue(row)!.Value.ToString("R", CultureInfo.InvariantCulture),
-            Decimal128Array a => a.GetValue(row)!.Value.ToString(CultureInfo.InvariantCulture),
+            // Through SqlDecimal, never GetValue: System.Decimal holds 28-29 significant digits, and
+            // for a wider Decimal128 GetValue returns the value with the excess digits dropped rather
+            // than throwing, so a 38-digit amount would land in the topic silently truncated.
+            // SqlDecimal.ToString is culture-independent and renders every stored digit at the
+            // column's scale, which for values that fit is byte-identical to the decimal rendering.
+            Decimal128Array a => a.GetSqlDecimal(row)!.Value.ToString(),
             BooleanArray a => a.GetValue(row)!.Value ? "true" : "false",
             Date32Array a => a.GetDateOnly(row)!.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             TimestampArray a => a.GetTimestamp(row)!.Value.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.ffffff'Z'", CultureInfo.InvariantCulture),

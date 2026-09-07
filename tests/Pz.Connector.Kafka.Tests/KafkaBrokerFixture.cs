@@ -94,6 +94,11 @@ public sealed class KafkaBrokerFixture : IAsyncLifetime
 
     public Task DeleteTopicAsync(string topic) => _admin!.DeleteTopicsAsync([topic]);
 
+    /// <summary>Raises the partition's low watermark to <paramref name="beforeOffset"/> the way
+    /// retention does, on demand: every record below it is gone for good.</summary>
+    public Task DeleteRecordsAsync(string topic, int partition, long beforeOffset) =>
+        _admin!.DeleteRecordsAsync([new TopicPartitionOffset(topic, partition, new Offset(beforeOffset))]);
+
     public async Task ProduceAsync(string topic,
         IEnumerable<(int? Partition, byte[]? Key, byte[]? Value, IReadOnlyList<KeyValuePair<string, byte[]?>>? Headers)> records)
     {
