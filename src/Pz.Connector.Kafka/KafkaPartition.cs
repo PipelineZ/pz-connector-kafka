@@ -8,10 +8,14 @@ namespace Pz.Connector.Kafka;
 
 /// <summary>The whole topic as one pz partition. Plan: metadata, watermarks, <see cref="ReadBounds"/>.
 /// Read: one assign-only consumer over every unfinished partition, each paused the moment it
-/// reaches its bound (or reports EOF -- a tail of transaction control records below the high
-/// watermark is never delivered), until all are done. The token candidate is the bound map and
-/// exists only after a completed enumeration: a cancelled or failed read must leave the stored
-/// token untouched, so the engine re-reads the same slice next time.</summary>
+/// reaches its bound or reports EOF, until all are done. The token candidate is the map of
+/// EFFECTIVE bounds -- what was actually read, not what was planned. EOF below the plan-time bound
+/// shortens the token, it never skips: a read_committed consumer stops at the last stable offset
+/// while the watermark query reported the high watermark, so an open transaction at plan time
+/// leaves [eof, bound) undelivered, and a token carrying the plan-time bound would step over
+/// records no run ever landed. The candidate exists only after a completed enumeration: a
+/// cancelled or failed read must leave the stored token untouched, so the engine re-reads the
+/// same slice next time.</summary>
 internal sealed class KafkaPartition(
     KafkaConnectionConfig connection, IKafkaClientFactory factory, KafkaDatasetConfig dataset,
     OffsetToken? token, ILogger logger) : IDatasetPartition, ISyncStatePartition
@@ -45,6 +49,9 @@ internal sealed class KafkaPartition(
             topic, bounds.Count, bounds.Count(b => !b.Done));
 
         var builder = new EnvelopeBatchBuilder(dataset.Encoding, options, redactor);
+        // Seeded with the plan-time bounds (a Done partition keeps its own, having read nothing);
+        // the EOF branch below shortens an entry to the offset the read actually stopped at.
+        var effective = bounds.ToDictionary(b => b.Partition, b => b.Bound);
         var unfinished = bounds.Where(b => !b.Done).ToDictionary(b => b.Partition);
         var headerScratch = new List<KeyValuePair<string, byte[]?>>();
         if (unfinished.Count > 0)
@@ -69,8 +76,10 @@ internal sealed class KafkaPartition(
                 {
                     result = consumer.Consume(PollInterval);
                 }
-                catch (ConsumeException ex)
+                catch (KafkaException ex)
                 {
+                    // KafkaException, not just its ConsumeException subclass: a fetch can fail with
+                    // either, and an unwrapped one carries librdkafka's unredacted reason out.
                     throw KafkaErrors.Wrap(ex, redactor, $"topic '{topic}': consuming");
                 }
 
@@ -93,9 +102,18 @@ internal sealed class KafkaPartition(
                     continue; // already paused; a record fetched before the pause took effect
                 }
 
-                if (result.IsPartitionEOF || result.Offset.Value >= bound.Bound)
+                if (result.IsPartitionEOF)
                 {
-                    Finish(consumer, topic, unfinished, p);
+                    // The EOF offset is where the read actually stopped. Clamped to the plan-time
+                    // bound because nothing above it was landed either.
+                    effective[p] = Math.Min(result.Offset.Value, bound.Bound);
+                    Finish(consumer, topic, unfinished, p, redactor);
+                    continue;
+                }
+
+                if (result.Offset.Value >= bound.Bound)
+                {
+                    Finish(consumer, topic, unfinished, p, redactor);
                     continue;
                 }
 
@@ -112,16 +130,27 @@ internal sealed class KafkaPartition(
                     result.Message.Key, result.Message.Value, headerScratch);
                 if (result.Offset.Value + 1 >= bound.Bound)
                 {
-                    Finish(consumer, topic, unfinished, p);
+                    Finish(consumer, topic, unfinished, p, redactor);
                 }
 
                 if (builder.TryTakeBatch(out var batch))
                 {
                     yield return batch!;
+                    // The idle timer measures broker silence, not engine backpressure: the batch
+                    // just yielded may be held past idle_timeout, and the first empty poll after
+                    // that would otherwise raise an unreachable-broker refusal about a healthy one.
+                    lastRecord = Environment.TickCount64;
                 }
             }
 
-            consumer.Unassign();
+            try
+            {
+                consumer.Unassign();
+            }
+            catch (KafkaException ex)
+            {
+                throw KafkaErrors.Wrap(ex, redactor, $"topic '{topic}': unassigning partitions");
+            }
         }
 
         if (builder.Flush() is { } last)
@@ -129,14 +158,22 @@ internal sealed class KafkaPartition(
             yield return last;
         }
 
-        _candidate = new OffsetToken(topic, bounds.ToDictionary(b => b.Partition, b => b.Bound)).Serialize();
-        CommitForDashboards(topic, bounds, groupId);
+        _candidate = new OffsetToken(topic, effective).Serialize();
+        CommitForDashboards(topic, effective, groupId);
     }
 
-    private static void Finish(IConsumer<byte[], byte[]> consumer, string topic, Dictionary<int, PartitionBound> unfinished, int partition)
+    private static void Finish(IConsumer<byte[], byte[]> consumer, string topic,
+        Dictionary<int, PartitionBound> unfinished, int partition, KafkaRedactor redactor)
     {
         unfinished.Remove(partition);
-        consumer.Pause([new TopicPartition(topic, partition)]);
+        try
+        {
+            consumer.Pause([new TopicPartition(topic, partition)]);
+        }
+        catch (KafkaException ex)
+        {
+            throw KafkaErrors.Wrap(ex, redactor, $"topic '{topic}': pausing partition {partition}");
+        }
     }
 
     private IReadOnlyList<PartitionBound> Plan(IConsumer<byte[], byte[]> consumer, string topic, KafkaRedactor redactor)
@@ -203,7 +240,7 @@ internal sealed class KafkaPartition(
 
     /// <summary>Best effort, only when the user configured a group: the landed read must never fail
     /// because a lag dashboard's bookkeeping did.</summary>
-    private void CommitForDashboards(string topic, IReadOnlyList<PartitionBound> bounds, string groupId)
+    private void CommitForDashboards(string topic, IReadOnlyDictionary<int, long> effective, string groupId)
     {
         if (connection.GroupId is null)
         {
@@ -213,7 +250,7 @@ internal sealed class KafkaPartition(
         try
         {
             using var consumer = factory.CreateConsumer(connection.ClientProperties, groupId);
-            consumer.Commit(bounds.Select(b => new TopicPartitionOffset(topic, b.Partition, new Offset(b.Bound))));
+            consumer.Commit(effective.Select(e => new TopicPartitionOffset(topic, e.Key, new Offset(e.Value))));
         }
         catch (KafkaException ex)
         {
