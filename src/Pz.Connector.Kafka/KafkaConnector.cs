@@ -99,8 +99,11 @@ public sealed class KafkaConnector : IConnector, ISourceConnector, ISinkConnecto
         return ValueTask.FromResult<ISource>(new KafkaSource(connection, _factory, _loggerFactory.CreateLogger<KafkaSource>()));
     }
 
-    ValueTask<ISink> ISinkConnector.OpenAsync(ConnectorConfig config, CancellationToken ct) =>
-        throw new NotImplementedException();
+    ValueTask<ISink> ISinkConnector.OpenAsync(ConnectorConfig config, CancellationToken ct)
+    {
+        var connection = ParseOrThrow(config);
+        return ValueTask.FromResult<ISink>(new KafkaSink(connection, _factory, _loggerFactory.CreateLogger<KafkaSink>()));
+    }
 
     private static KafkaConnectionConfig ParseOrThrow(ConnectorConfig config)
     {
