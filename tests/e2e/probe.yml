@@ -1,0 +1,7 @@
+connection:
+  bootstrap_servers: ${KAFKA_BOOTSTRAP}
+read:
+  dataset: e2e-in
+write:
+  output: e2e-probe
+  mode: append

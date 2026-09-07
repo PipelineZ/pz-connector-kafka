@@ -1,0 +1,15 @@
+# Both directions through the packaged connector. The source topic is feed-shaped (no sync:
+# block = auto = the connector's natural shape), so the append output needs `duplicates: accept`.
+events:
+  connector: kafka
+  bootstrap_servers: ${KAFKA_BOOTSTRAP}
+  entities:
+    orders_in:
+      read:
+        topic: e2e-in
+    orders_out:
+      write:
+        topic: e2e-out
+        strategy: append
+        duplicates: accept
+        key: id

@@ -30,3 +30,68 @@ jobs:
         run: dotnet test Pz.Connector.Kafka.slnx -c Release --no-build --blame-hang --blame-hang-timeout 10m --blame-hang-dump-type mini
       - if: runner.os == 'Windows'
         run: dotnet test Pz.Connector.Kafka.slnx -c Release --no-build --filter "Category!=Docker" --blame-hang --blame-hang-timeout 10m --blame-hang-dump-type mini
+
+  pack-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+      - name: Publish the host RID and pack
+        run: |
+          set -euo pipefail
+          # -p:PzPackaging=self-contained works around a NuGet package-props import-order gap in
+          # Pz.Connectors.Sdk 0.5.0: its build/Pz.Connectors.Sdk.props sets PublishAot/PublishSingleFile
+          # from file-level PropertyGroups conditioned on PzPackaging, which are evaluated (via
+          # Microsoft.Common.props' nuget.g.props import) BEFORE this project's own <PzPackaging> is
+          # read, so the props file's own 'aot' default wins unless PzPackaging also arrives as a
+          # global (-p:) property, which is evaluated first and cannot be overridden later.
+          dotnet publish src/Pz.Connector.Kafka -c Release -r linux-x64 -p:PzPackaging=self-contained
+          dotnet pack src/Pz.Connector.Kafka -c Release -o packages -p:PzPackaging=self-contained
+          ls packages
+          VERSION="$(ls packages/Pz.Connector.Kafka.*.nupkg | sed -E 's|.*/Pz\.Connector\.Kafka\.(.*)\.nupkg|\1|')"
+          echo "PKG_VERSION=${VERSION}" >> "$GITHUB_ENV"
+          unzip -p "packages/Pz.Connector.Kafka.${VERSION}.nupkg" pz.connector.json | tee manifest.json
+          grep -q '"runtime": "process"' manifest.json
+          grep -q '"name": "kafka"' manifest.json
+          grep -q '"projectDirectoryAnchor": true' manifest.json
+          grep -q '"SyncState"' manifest.json
+      - name: Start a broker
+        run: |
+          set -euo pipefail
+          docker run -d --name kafka -p 9092:9092 apache/kafka:3.9.1
+          for i in $(seq 1 60); do
+            docker exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1 && break
+            sleep 1
+          done
+          docker exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --create --topic e2e-in --partitions 2
+          docker exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --create --topic e2e-out --partitions 1
+          docker exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --create --topic e2e-probe --partitions 1
+          printf '{"name":"ann"}\n{"name":"bob"}\n{"name":"cy"}\n' \
+            | docker exec -i kafka /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server localhost:9092 --topic e2e-in
+      - name: Install pz, restore from the local feed, run, conformance-test
+        env:
+          KAFKA_BOOTSTRAP: localhost:9092
+        run: |
+          set -euo pipefail
+          dotnet tool install --global pz --version 0.5.0
+          cd tests/e2e
+          sed -i "s/0.0.0-PLACEHOLDER/${PKG_VERSION}/" project.yml
+          pz restore --feeds "${GITHUB_WORKSPACE}/packages"
+          PKG_DIR=".pz/packages/Pz.Connector.Kafka/${PKG_VERSION}"
+          test -f "${PKG_DIR}/native/Pz.Connector.Kafka"
+          pz run
+          # Three rows in, three records out.
+          docker exec kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 \
+            --topic e2e-out --from-beginning --max-messages 3 --timeout-ms 30000 --property print.key=true | tee out.txt
+          test "$(wc -l < out.txt)" -eq 3
+          grep -q '"name":"bob"' out.txt
+          # A second run lands nothing new (the token advanced) and stays green.
+          pz run
+          pz connector test "${PKG_DIR}" --config probe.yml | tee report.txt
+          ! grep -q FAIL report.txt
+          grep -q 'sync-state-roundtrip' report.txt

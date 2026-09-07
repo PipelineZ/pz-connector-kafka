@@ -1,0 +1,56 @@
+# NuGet trusted publishing (OIDC) -- no long-lived API key secret is stored in this repo.
+# MANUAL PREREQUISITES (one-time):
+#   1. On nuget.org (https://www.nuget.org/account/trustedpublishing -> Add policy), create a trusted
+#      publishing policy naming this repository's owner/name, this exact workflow filename
+#      ("release.yml", no path), and environment "release". Scope it to the package id
+#      "Pz.Connector.Kafka" with the "Push new packages and package versions" scope.
+#   2. Create a GitHub Environment named "release" and add an environment secret NUGET_USER = the
+#      nuget.org profile name (NOT email) of the account that owns the policy.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment: release
+    permissions:
+      contents: read
+      id-token: write # required for NuGet/login's OIDC exchange.
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # MinVer computes the release version from this tag + history.
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet build Pz.Connector.Kafka.slnx -c Release
+      - run: dotnet test Pz.Connector.Kafka.slnx -c Release --no-build --blame-hang --blame-hang-timeout 10m --blame-hang-dump-type mini
+      # One self-contained single-file publish per RID the package ships; pack collects them all
+      # (the SDK's PzRuntimeIdentifiers default) and writes the manifest by running the linux-x64 binary.
+      # -p:PzPackaging=self-contained works around a NuGet package-props import-order gap in
+      # Pz.Connectors.Sdk 0.5.0: its build/Pz.Connectors.Sdk.props sets PublishAot/PublishSingleFile
+      # from file-level PropertyGroups conditioned on PzPackaging, which are evaluated (via
+      # Microsoft.Common.props' nuget.g.props import) BEFORE this project's own <PzPackaging> is read,
+      # so the props file's own 'aot' default wins unless PzPackaging also arrives as a global (-p:)
+      # property, which is evaluated first and cannot be overridden later.
+      - run: |
+          set -euo pipefail
+          for rid in linux-x64 linux-arm64 osx-arm64 win-x64; do
+            dotnet publish src/Pz.Connector.Kafka -c Release -r "$rid" -p:PzPackaging=self-contained
+          done
+          dotnet pack src/Pz.Connector.Kafka -c Release -o packages -p:PzPackaging=self-contained
+      - name: NuGet login (trusted publishing)
+        id: login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ secrets.NUGET_USER }}
+      - name: Push package to nuget.org
+        run: >
+          dotnet nuget push 'packages/*.nupkg'
+          --source https://api.nuget.org/v3/index.json
+          --api-key ${{ steps.login.outputs.NUGET_API_KEY }}
+          --skip-duplicate
