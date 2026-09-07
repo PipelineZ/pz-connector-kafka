@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Pz.Connector.Kafka/Pz.Connector.Kafka.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Pz.Connector.Kafka.Tests/Pz.Connector.Kafka.Tests.csproj" />
+  </Folder>
+</Solution>
