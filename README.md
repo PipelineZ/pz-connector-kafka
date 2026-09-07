@@ -101,9 +101,10 @@ A feed dataset paired with an `append` output needs `duplicates: accept` on that
 ```
 
 Without `value:`, each row becomes a JSON object of every column not named in `key:` or
-`headers:`: integers and doubles as numbers, decimals as strings, booleans, dates as
-`yyyy-MM-dd`, timestamps as `yyyy-MM-ddTHH:mm:ss.ffffffZ`, nulls as `null`. The producer is
-idempotent with `acks=all`; commit flushes and fails if any record was not acknowledged. Delivery
+`headers:`: integers and doubles as numbers, decimals as strings (every digit of a 38-digit
+value), booleans, dates as `yyyy-MM-dd`, timestamps as `yyyy-MM-ddTHH:mm:ss.ffffffZ`, nulls as
+`null`. The producer is idempotent with `acks=all`; commit flushes and fails if any record was not
+acknowledged. Delivery
 across runs is at-least-once, as for every `append` output. The topic must already exist.
 
 A row whose `value:` column is null produces a record with a null value -- on a compacted topic that

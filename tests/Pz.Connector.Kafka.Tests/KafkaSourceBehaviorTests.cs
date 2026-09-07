@@ -142,6 +142,23 @@ public sealed class KafkaSourceBehaviorTests
     }
 
     [SkippableFact]
+    public async Task Token_below_the_low_watermark_fails_non_transiently_naming_retention()
+    {
+        var topic = await _broker.CreateTopicAsync(partitions: 1);
+        await _broker.ProduceTextAsync(topic, ["a", "b", "c"]);
+        // The stored token says "resume at 1"; the broker has since dropped offsets 0 and 1.
+        var token = new OffsetToken(topic, new Dictionary<int, long> { [0] = 1 }).Serialize();
+        await _broker.DeleteRecordsAsync(topic, partition: 0, beforeOffset: 2);
+
+        var ex = await Assert.ThrowsAsync<PzConnectorException>(() => ReadAsync(new KafkaConnector(), Config, Spec(topic, token)));
+
+        Assert.False(ex.IsTransient);
+        Assert.Contains("partition 0", ex.Message);
+        Assert.Contains("dropped by retention", ex.Message);
+        Assert.Contains("--full-refresh", ex.Message);
+    }
+
+    [SkippableFact]
     public async Task Token_beyond_the_high_watermark_fails_non_transiently()
     {
         var topic = await _broker.CreateTopicAsync(partitions: 1);
