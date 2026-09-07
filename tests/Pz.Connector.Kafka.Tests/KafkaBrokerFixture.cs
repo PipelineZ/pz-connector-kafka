@@ -36,7 +36,11 @@ public sealed class KafkaBrokerFixture : IAsyncLifetime
         // and a collection fixture that throws is a failed fixture, not a skip. Testcontainers 4.15
         // retired the parameterless builder, so the image is a constructor argument;
         // apache/kafka-native is the KRaft image (no ZooKeeper, boots in a couple of seconds).
-        _container = new KafkaBuilder("apache/kafka-native:3.9.1").Build();
+        // Auto-creation is off so a topic exists only because a fact created it: the unknown-topic
+        // refusal is only a refusal if the broker does not quietly conjure the topic up first.
+        _container = new KafkaBuilder("apache/kafka-native:3.9.1")
+            .WithEnvironment("KAFKA_AUTO_CREATE_TOPICS_ENABLE", "false")
+            .Build();
         await _container.StartAsync().ConfigureAwait(false);
         BootstrapServers = _container.GetBootstrapAddress();
         _admin = new AdminClientBuilder(new AdminClientConfig { BootstrapServers = BootstrapServers }).Build();
@@ -58,24 +62,35 @@ public sealed class KafkaBrokerFixture : IAsyncLifetime
         name ??= "pz_" + Guid.NewGuid().ToString("N")[..12];
         await _admin!.CreateTopicsAsync([new TopicSpecification { Name = name, NumPartitions = partitions, ReplicationFactor = 1 }])
             .ConfigureAwait(false);
-        // Metadata propagation is asynchronous: poll until every partition has a leader.
+        await WaitForPartitionsAsync(name, partitions).ConfigureAwait(false);
+        return name;
+    }
+
+    public async Task AddPartitionsAsync(string topic, int total)
+    {
+        await _admin!.CreatePartitionsAsync([new PartitionsSpecification { Topic = topic, IncreaseTo = total }]).ConfigureAwait(false);
+        await WaitForPartitionsAsync(topic, total).ConfigureAwait(false);
+    }
+
+    /// <summary>Metadata propagation is asynchronous, so a produce issued the instant the admin call
+    /// returns can be refused for a partition the cluster has not finished electing a leader for.
+    /// Poll until every expected partition has one.</summary>
+    private async Task WaitForPartitionsAsync(string topic, int partitions)
+    {
         for (var attempt = 0; attempt < 100; attempt++)
         {
-            var md = _admin.GetMetadata(name, TimeSpan.FromSeconds(5));
+            var md = _admin!.GetMetadata(topic, TimeSpan.FromSeconds(5));
             if (md.Topics.Count == 1 && md.Topics[0].Error.Code == ErrorCode.NoError
                 && md.Topics[0].Partitions.Count == partitions && md.Topics[0].Partitions.All(p => p.Leader >= 0))
             {
-                return name;
+                return;
             }
 
             await Task.Delay(50).ConfigureAwait(false);
         }
 
-        throw new InvalidOperationException($"topic {name} did not become ready");
+        throw new InvalidOperationException($"topic {topic} did not report {partitions} ready partition(s)");
     }
-
-    public Task AddPartitionsAsync(string topic, int total) =>
-        _admin!.CreatePartitionsAsync([new PartitionsSpecification { Topic = topic, IncreaseTo = total }]);
 
     public Task DeleteTopicAsync(string topic) => _admin!.DeleteTopicsAsync([topic]);
 
