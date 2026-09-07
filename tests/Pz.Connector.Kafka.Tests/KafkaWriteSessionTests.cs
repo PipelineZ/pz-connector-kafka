@@ -64,8 +64,8 @@ public sealed class KafkaWriteSessionTests
     public async Task A_flush_that_never_drains_fails_the_commit_transiently()
     {
         var producer = new FakeProducer { OutstandingAfterFlush = 3 };
-        // A zero stall budget is one flush slice: the fake never shrinks its queue, so the very
-        // first slice is already a stall.
+        // A zero stall budget is one slice: the first flush sets the baseline and the second one,
+        // which the fake leaves at the same length, is already the stall.
         await using var session = Session(producer, flushStall: TimeSpan.Zero);
         using (var batch = Batch())
         {
@@ -83,22 +83,29 @@ public sealed class KafkaWriteSessionTests
     public async Task Abort_settles_what_is_queued_and_the_session_refuses_to_commit()
     {
         var producer = new FakeProducer();
-        await using var session = Session(producer);
-        using (var batch = Batch())
+        await using (var session = Session(producer))
         {
-            await session.WriteBatchAsync(batch, CancellationToken.None);
+            using (var batch = Batch())
+            {
+                await session.WriteBatchAsync(batch, CancellationToken.None);
+            }
+
+            await session.AbortAsync(CancellationToken.None);
+
+            Assert.Equal(1, producer.FlushCalls);
+            Assert.Equal(2, producer.Produced.Count);
+            await Assert.ThrowsAsync<InvalidOperationException>(async () => await session.CommitAsync(CancellationToken.None));
+            await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            {
+                using var batch = Batch();
+                await session.WriteBatchAsync(batch, CancellationToken.None);
+            });
+
+            Assert.False(producer.Disposed);
         }
 
-        await session.AbortAsync(CancellationToken.None);
-
-        Assert.Equal(1, producer.FlushCalls);
-        Assert.Equal(2, producer.Produced.Count);
-        await Assert.ThrowsAsync<InvalidOperationException>(async () => await session.CommitAsync(CancellationToken.None));
-        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
-        {
-            using var batch = Batch();
-            await session.WriteBatchAsync(batch, CancellationToken.None);
-        });
+        // The producer is the session's to own: disposing the session releases the librdkafka handle.
+        Assert.True(producer.Disposed);
     }
 
     [Fact]

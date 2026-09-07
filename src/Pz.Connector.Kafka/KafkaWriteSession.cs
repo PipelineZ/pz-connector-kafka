@@ -50,7 +50,9 @@ internal sealed class KafkaWriteSession : ISinkWriteSession
         _keyIndex = IndexOf(schema, output.KeyColumn);
         _valueIndex = IndexOf(schema, output.ValueColumn);
         _headerIndexes = _output.HeaderColumns.Select(h => IndexOf(schema, h)).ToArray();
-        // At least one slice: a zero budget still gets one flush before the stall verdict.
+        // At least one slice. The first flush only establishes the baseline the next one is
+        // compared against, so a zero budget gives up on the first flush that fails to shrink the
+        // queue -- the second flush overall.
         _flushStallSlices = Math.Max(1, (int)((flushStall ?? TimeSpan.FromSeconds(60)).Ticks / FlushSlice.Ticks));
         // Delivery reports arrive on the producer's own poll thread, not on the thread that
         // produced: the first failure is claimed under an interlocked write and read back with a

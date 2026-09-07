@@ -23,20 +23,29 @@ internal sealed class KafkaSink(KafkaConnectionConfig connection, IKafkaClientFa
         var errors = new List<string>();
         var output = KafkaOutputConfig.Parse(spec, errors);
         output?.ValidateAgainst(spec.Output, schema, errors);
+        if (!string.Equals(spec.Mode, "append", StringComparison.Ordinal))
+        {
+            errors.Add($"output '{spec.Output}': mode '{spec.Mode}' is not supported; kafka is append-only");
+        }
+
         if (output is null || errors.Count > 0)
         {
             // Parse and ValidateAgainst already name the output in every message they add.
             throw KafkaErrors.Fatal(string.Join("; ", errors), connection.Redactor);
         }
 
-        if (!string.Equals(spec.Mode, "append", StringComparison.Ordinal))
-        {
-            throw KafkaErrors.Fatal($"output '{spec.Output}': mode '{spec.Mode}' is not supported; kafka is append-only", connection.Redactor);
-        }
-
         var producer = factory.CreateProducer(connection.ClientProperties, output.Compression);
-        return ValueTask.FromResult<ISinkWriteSession>(new KafkaWriteSession(
-            producer, output, schema, connection.Redactor, logger, TimeSpan.FromSeconds(connection.IdleTimeoutSeconds)));
+        try
+        {
+            return ValueTask.FromResult<ISinkWriteSession>(new KafkaWriteSession(
+                producer, output, schema, connection.Redactor, logger, TimeSpan.FromSeconds(connection.IdleTimeoutSeconds)));
+        }
+        catch
+        {
+            // Nothing owns the librdkafka handle until the session exists.
+            producer.Dispose();
+            throw;
+        }
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;

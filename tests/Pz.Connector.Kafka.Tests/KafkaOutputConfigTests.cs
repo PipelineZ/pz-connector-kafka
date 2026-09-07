@@ -84,6 +84,23 @@ public sealed class KafkaOutputConfigTests
     }
 
     [Fact]
+    public void ValidateAgainst_refuses_a_column_the_record_json_cannot_carry()
+    {
+        var schema = new Schema([new Field("id", Int64Type.Default, true), new Field("ratio", FloatType.Default, true)], null);
+        var errors = new List<string>();
+        var config = KafkaOutputConfig.Parse(Spec([]), errors)!;
+
+        config.ValidateAgainst("order-events", schema, errors);
+
+        // Named by column and type, and aggregated like every other schema error -- not thrown
+        // out of the row writer once the producer is already running.
+        var error = Assert.Single(errors);
+        Assert.Contains("output 'order-events':", error);
+        Assert.Contains("'ratio'", error);
+        Assert.Contains("Float", error);
+    }
+
+    [Fact]
     public void ValidateAgainst_reports_missing_and_mistyped_columns()
     {
         var errors = new List<string>();

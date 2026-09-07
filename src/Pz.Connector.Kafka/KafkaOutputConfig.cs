@@ -17,6 +17,15 @@ internal sealed record KafkaOutputConfig(
     private static readonly ArrowTypeId[] HeaderTypes =
         [ArrowTypeId.String, ArrowTypeId.Int32, ArrowTypeId.Int64, ArrowTypeId.Boolean, ArrowTypeId.Date32, ArrowTypeId.Timestamp];
 
+    /// <summary>Exactly what <c>RowJsonWriter</c> can spell -- pz's v0 type matrix. A column outside
+    /// it must be refused here, while the errors still aggregate and before a producer exists;
+    /// reaching the writer with one throws mid-batch, after rows have already been produced.</summary>
+    private static readonly ArrowTypeId[] JsonTypes =
+    [
+        ArrowTypeId.String, ArrowTypeId.Int32, ArrowTypeId.Int64, ArrowTypeId.Double,
+        ArrowTypeId.Decimal128, ArrowTypeId.Boolean, ArrowTypeId.Date32, ArrowTypeId.Timestamp,
+    ];
+
     public static KafkaOutputConfig? Parse(OutputSpec spec, List<string> errors)
     {
         var start = errors.Count;
@@ -83,6 +92,17 @@ internal sealed record KafkaOutputConfig(
         foreach (var header in HeaderColumns)
         {
             Check(prefix, schema, "headers", header, HeaderTypes, errors);
+        }
+
+        // Every column the record value is built from, which is empty when 'value:' names one.
+        foreach (var index in JsonColumnIndexes(schema))
+        {
+            var field = schema.FieldsList[index];
+            if (!JsonTypes.Contains(field.DataType.TypeId))
+            {
+                errors.Add($"{prefix}: column '{field.Name}' is {field.DataType.TypeId}, which the record value's JSON "
+                    + $"cannot carry; allowed: {string.Join(", ", JsonTypes)}. Name a 'value' column, or drop it from the pipeline's projection");
+            }
         }
     }
 
