@@ -12,8 +12,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Pz.Connectors.Sdk" Version="0.5.1" />
-    <PackageReference Include="Pz.Connectors.Abstractions" Version="0.5.1" />
+    <PackageReference Include="Pz.Connectors.Sdk" Version="0.6.0" />
+    <PackageReference Include="Pz.Connectors.Abstractions" Version="0.6.0" />
     <PackageReference Include="Confluent.Kafka" Version="2.15.0" />
   </ItemGroup>
 
