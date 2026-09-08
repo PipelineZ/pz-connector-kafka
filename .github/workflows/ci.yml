@@ -78,7 +78,7 @@ jobs:
           KAFKA_BOOTSTRAP: localhost:9092
         run: |
           set -euo pipefail
-          dotnet tool install --global pz --version 0.5.1
+          dotnet tool install --global pz --version 0.6.0
           cd tests/e2e
           sed -i "s/0.0.0-PLACEHOLDER/${PKG_VERSION}/" project.yml
           pz restore --feeds "${GITHUB_WORKSPACE}/packages"
