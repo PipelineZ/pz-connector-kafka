@@ -28,9 +28,12 @@
          appear here and must NOT appear on non-connector packages. -->
     <PackageTags>pipelinez-connector;pipelinez;pz;kafka;streaming;etl;elt;data-pipeline;arrow</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>icon.png</PackageIcon>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(IsPackable)' != 'false'">
     <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\" />
+    <!-- Shared PipelineZ mark: square, opaque dark tile, reads correctly in both gallery themes. -->
+    <None Include="$(MSBuildThisFileDirectory)assets/brand/pz-icon.png" Pack="true" PackagePath="icon.png" Visible="false" />
   </ItemGroup>
 </Project>
