@@ -15,9 +15,9 @@ public sealed class KafkaStatsBridgeTests
         bridge.OnStatistics(First);
         bridge.OnStatistics(Second);
         var s = acc.Snapshot();
-        Assert.Equal(19, s.Requests);
+        Assert.Equal(10, s.Requests);
         Assert.Equal(1900, s.WireBytes);
-        Assert.Equal(2, s.Throttled);
+        Assert.Equal(0, s.Throttled);
     }
 
     [Fact]
@@ -28,7 +28,7 @@ public sealed class KafkaStatsBridgeTests
         var t = new Thread(() => bridge.OnStatistics(First));
         t.Start();
         t.Join();
-        Assert.Equal(10, acc.Snapshot().Requests);
+        Assert.Equal(4, acc.Snapshot().Requests);
     }
 
     [Fact]
@@ -46,7 +46,7 @@ public sealed class KafkaStatsBridgeTests
         var bridge = new KafkaStatsBridge(acc);
         bridge.OnStatistics(Second);
         bridge.OnStatistics(First);
-        Assert.Equal(19, acc.Snapshot().Requests);
+        Assert.Equal(10, acc.Snapshot().Requests);
     }
 
     [Fact]
@@ -74,6 +74,6 @@ public sealed class KafkaStatsBridgeTests
         var bridge = new KafkaStatsBridge(acc);
         bridge.OnStatistics(First);
         bridge.Complete();
-        Assert.Equal(10, acc.Snapshot().Requests);
+        Assert.Equal(4, acc.Snapshot().Requests);
     }
 }

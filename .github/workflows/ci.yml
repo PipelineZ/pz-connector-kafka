@@ -79,7 +79,7 @@ jobs:
           KAFKA_BOOTSTRAP: localhost:9092
         run: |
           set -euo pipefail
-          dotnet tool install --global pz --version 0.11.0-preview.1
+          dotnet tool install --global pz --version 0.11.0-preview.2
           cd tests/e2e
           sed -i "s/0.0.0-PLACEHOLDER/${PKG_VERSION}/" project.yml
           pz restore --feeds "${GITHUB_WORKSPACE}/packages"
@@ -88,7 +88,7 @@ jobs:
           pz run
           # The host attaches the connector's own request count to every node that ran it.
           RUN_DIR="$(ls -td .pz/runs/*/ | head -n 1)"
-          jq -e '[.nodes[] | select(.connector=="kafka") | .remote.requests > 0] | all' "${RUN_DIR}run_results.json"
+          jq -e '[.nodes[] | select(.connector=="kafka")] | (length == 2) and (map(.remote.requests > 0) | all)' "${RUN_DIR}run_results.json"
           # Three rows in, three records out.
           docker exec kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 \
             --topic e2e-out --from-beginning --max-messages 3 --timeout-ms 30000 --property print.key=true | tee out.txt

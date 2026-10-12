@@ -10,60 +10,48 @@ namespace Pz.Connector.Kafka;
 ///
 /// <para>A client that closes before its first statistics tick (a short read, a small write) has
 /// reported nothing, yet it did issue at least one fetch or produce request. <see cref="Complete"/>
-/// adds that one request as the floor, and only when no tick ever arrived; real ticks supersede it.</para></summary>
+/// adds that one request as the floor, and only when no tick ever arrived; real ticks supersede it.</para>
+///
+/// <para><c>requests</c> is the <c>tx</c> delta alone: every response (<c>rx</c>) answers a request
+/// already counted in <c>tx</c>, so adding both would double the round trips. Throttling is not
+/// reported: librdkafka's per-broker <c>throttle</c> is a rolling-window statistic that resets each
+/// interval, so its <c>cnt</c> is a sample count, not a cumulative counter.</para></summary>
 internal sealed class KafkaStatsBridge(IConnectorStats target) : IDisposable
 {
     private readonly object _gate = new();
     private long _tx;
-    private long _rx;
     private long _txBytes;
     private long _rxBytes;
-    private long _throttle;
     private bool _ticked;
     private bool _completed;
 
     /// <summary>Called on librdkafka's statistics thread with the cumulative JSON; adds the delta since the last call.</summary>
     public void OnStatistics(string json)
     {
-        long tx, rx, txBytes, rxBytes, throttle;
+        long tx, txBytes, rxBytes;
         try
         {
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
             tx = Counter(root, "tx");
-            rx = Counter(root, "rx");
             txBytes = Counter(root, "tx_bytes");
             rxBytes = Counter(root, "rx_bytes");
-            throttle = 0;
-            if (root.TryGetProperty("brokers", out var brokers) && brokers.ValueKind == JsonValueKind.Object)
-            {
-                foreach (var broker in brokers.EnumerateObject())
-                {
-                    if (broker.Value.ValueKind == JsonValueKind.Object
-                        && broker.Value.TryGetProperty("throttle", out var t) && t.ValueKind == JsonValueKind.Object)
-                    {
-                        throttle += Counter(t, "cnt");
-                    }
-                }
-            }
         }
         catch (JsonException)
         {
             return;
         }
 
-        long dRequests, dBytes, dThrottle;
+        long dRequests, dBytes;
         lock (_gate)
         {
             _ticked = true;
-            dRequests = Delta(tx, ref _tx) + Delta(rx, ref _rx);
+            dRequests = Delta(tx, ref _tx);
             dBytes = Delta(txBytes, ref _txBytes) + Delta(rxBytes, ref _rxBytes);
-            dThrottle = Delta(throttle, ref _throttle);
         }
 
         target.AddRequests(dRequests);
         target.AddWireBytes(dBytes);
-        target.AddThrottled(dThrottle);
     }
 
     /// <summary>Counts messages the connector itself consumed or produced, for clients that close before any statistics tick.</summary>
