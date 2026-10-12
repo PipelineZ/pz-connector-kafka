@@ -232,10 +232,10 @@ public sealed class KafkaPartitionLoopTests
         /// that rejects a property.</summary>
         public Exception? CreateConsumerFailure { get; set; }
 
-        public IConsumer<byte[], byte[]> CreateConsumer(IReadOnlyDictionary<string, string> properties, string groupId) =>
+        public IConsumer<byte[], byte[]> CreateConsumer(IReadOnlyDictionary<string, string> properties, string groupId, KafkaStatsBridge? stats = null) =>
             CreateConsumerFailure is { } failure ? throw failure : Consumer;
 
-        public IProducer<byte[], byte[]> CreateProducer(IReadOnlyDictionary<string, string> properties, string compression) =>
+        public IProducer<byte[], byte[]> CreateProducer(IReadOnlyDictionary<string, string> properties, string compression, KafkaStatsBridge? stats = null) =>
             throw new NotSupportedException();
 
         public IAdminClient CreateAdmin(IReadOnlyDictionary<string, string> properties) =>

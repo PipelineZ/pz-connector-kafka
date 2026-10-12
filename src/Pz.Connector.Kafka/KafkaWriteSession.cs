@@ -29,6 +29,7 @@ internal sealed class KafkaWriteSession : ISinkWriteSession
     private readonly KafkaOutputConfig _output;
     private readonly KafkaRedactor _redactor;
     private readonly ILogger _logger;
+    private readonly KafkaStatsBridge? _stats;
     private readonly RowJsonWriter? _json;
     private readonly int _keyIndex;
     private readonly int _valueIndex;
@@ -43,12 +44,13 @@ internal sealed class KafkaWriteSession : ISinkWriteSession
     private bool _disposed;
 
     public KafkaWriteSession(IProducer<byte[], byte[]> producer, KafkaOutputConfig output, Schema schema,
-        KafkaRedactor redactor, ILogger logger, TimeSpan? flushStall = null)
+        KafkaRedactor redactor, ILogger logger, TimeSpan? flushStall = null, KafkaStatsBridge? stats = null)
     {
         _producer = producer;
         _output = output;
         _redactor = redactor;
         _logger = logger;
+        _stats = stats;
         _json = output.ValueColumn is null ? new RowJsonWriter(schema, output.JsonColumnIndexes(schema)) : null;
         _keyIndex = IndexOf(schema, output.KeyColumn);
         _valueIndex = IndexOf(schema, output.ValueColumn);
@@ -98,6 +100,7 @@ internal sealed class KafkaWriteSession : ISinkWriteSession
         }
 
         _batches++;
+        _stats?.CountMessages(batch.Length);
         return ValueTask.CompletedTask;
     }
 
@@ -117,6 +120,9 @@ internal sealed class KafkaWriteSession : ISinkWriteSession
         }
         while (outstanding > 0 && Volatile.Read(ref _firstFailure) is null && stalled < _flushStallSlices);
 
+        // The engine snapshots a node's stats when the commit returns, before the session is
+        // disposed, so the producer's one-request floor has to land here, after the flush.
+        _stats?.Complete();
         ThrowIfDeliveryFailed();
         if (outstanding > 0)
         {
@@ -148,6 +154,7 @@ internal sealed class KafkaWriteSession : ISinkWriteSession
         {
             _disposed = true;
             _producer.Dispose();
+            _stats?.Dispose();
         }
 
         return ValueTask.CompletedTask;

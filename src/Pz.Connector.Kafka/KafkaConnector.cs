@@ -8,7 +8,7 @@ namespace Pz.Connector.Kafka;
 
 /// <summary>Apache Kafka for pz: a topic is a feed-shaped dataset resumed from per-partition offsets
 /// the engine stores as the dataset's sync-state token; a sink output is an append-only produce.
-/// Capabilities: <see cref="ConnectorCapabilities.SyncState"/> only -- one token per dataset means
+/// Capabilities: <see cref="ConnectorCapabilities.SyncState"/> and <see cref="ConnectorCapabilities.ReportsStats"/> -- one token per dataset means
 /// one pz partition per dataset, and there is no SQL fragment DuckDB could scan a broker with.</summary>
 public sealed class KafkaConnector : IConnector, ISourceConnector, ISinkConnector
 {
@@ -32,7 +32,7 @@ public sealed class KafkaConnector : IConnector, ISourceConnector, ISinkConnecto
             ?? "0.0.0",
         ProtocolVersion.Major);
 
-    public ConnectorCapabilities Capabilities => ConnectorCapabilities.SyncState;
+    public ConnectorCapabilities Capabilities => ConnectorCapabilities.SyncState | ConnectorCapabilities.ReportsStats;
 
     public string ConnectionConfigSchema => """
         { "type": "object", "required": ["bootstrap_servers"], "properties": {
