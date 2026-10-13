@@ -38,9 +38,13 @@ internal sealed class KafkaPartition(
         var topic = dataset.Topic;
         // librdkafka requires a group.id even for an assign-only consumer that never joins a group.
         var groupId = connection.GroupId ?? "pz-" + Guid.NewGuid().ToString("N");
+        // Captured here, on the caller's context: librdkafka reports statistics from its own
+        // thread, where the ambient handle does not flow.
+        var stats = ConnectorStats.Current;
 
         IReadOnlyList<PartitionBound> bounds;
-        using (var consumer = Build(() => factory.CreateConsumer(connection.ClientProperties, groupId), topic, redactor))
+        using (var planStats = new KafkaStatsBridge(stats))
+        using (var consumer = Build(() => factory.CreateConsumer(connection.ClientProperties, groupId, planStats), topic, redactor))
         {
             bounds = await Task.Run(() => Plan(consumer, topic, redactor, ct), ct).ConfigureAwait(false);
         }
@@ -56,7 +60,8 @@ internal sealed class KafkaPartition(
         var headerScratch = new List<KeyValuePair<string, byte[]?>>();
         if (unfinished.Count > 0)
         {
-            using var consumer = Build(() => factory.CreateConsumer(connection.ClientProperties, groupId), topic, redactor);
+            using var readStats = new KafkaStatsBridge(stats);
+            using var consumer = Build(() => factory.CreateConsumer(connection.ClientProperties, groupId, readStats), topic, redactor);
             try
             {
                 consumer.Assign(unfinished.Values.Select(b => new TopicPartitionOffset(topic, b.Partition, new Offset(b.Resume))));
@@ -141,6 +146,7 @@ internal sealed class KafkaPartition(
 
                 builder.Append(topic, p, result.Offset.Value, result.Message.Timestamp.UtcDateTime,
                     result.Message.Key, result.Message.Value, headerScratch);
+                readStats.CountMessages(1);
                 if (result.Offset.Value + 1 >= bound.Bound)
                 {
                     Finish(consumer, topic, unfinished, p, redactor);

@@ -36,15 +36,18 @@ internal sealed class KafkaSink(KafkaConnectionConfig connection, IKafkaClientFa
             throw KafkaErrors.Fatal(string.Join("; ", errors), connection.Redactor);
         }
 
+        // Captured at operation start: delivery and statistics callbacks run on librdkafka's threads.
+        var stats = new KafkaStatsBridge(ConnectorStats.Current);
         IProducer<byte[], byte[]> producer;
         try
         {
-            producer = factory.CreateProducer(connection.ClientProperties, output.Compression);
+            producer = factory.CreateProducer(connection.ClientProperties, output.Compression, stats);
         }
         catch (Exception ex)
         {
             // librdkafka rejects a `client:` property inside the builder, quoting the value it
             // refused; outside the try below because there is no handle to dispose yet.
+            stats.Dispose();
             throw KafkaErrors.Wrap(ex, connection.Redactor,
                 $"topic '{output.Topic}': building the kafka client; check `client:` properties");
         }
@@ -52,12 +55,13 @@ internal sealed class KafkaSink(KafkaConnectionConfig connection, IKafkaClientFa
         try
         {
             return ValueTask.FromResult<ISinkWriteSession>(new KafkaWriteSession(
-                producer, output, schema, connection.Redactor, logger, TimeSpan.FromSeconds(connection.IdleTimeoutSeconds)));
+                producer, output, schema, connection.Redactor, logger, TimeSpan.FromSeconds(connection.IdleTimeoutSeconds), stats: stats));
         }
         catch
         {
             // Nothing owns the librdkafka handle until the session exists.
             producer.Dispose();
+            stats.Dispose();
             throw;
         }
     }
