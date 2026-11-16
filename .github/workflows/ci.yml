@@ -22,7 +22,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: '11.0.x'
       - run: dotnet build Pz.Connector.Kafka.slnx -c Release
       # ubuntu has docker, so the Testcontainers broker facts run; windows cannot pull Linux images,
       # so it runs everything that is not broker-backed.
@@ -40,7 +40,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: '11.0.x'
       - name: Publish the host RID and pack
         run: |
           set -euo pipefail

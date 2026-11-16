@@ -26,7 +26,7 @@ jobs:
           fetch-depth: 0 # MinVer computes the release version from this tag + history.
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: '11.0.x'
       - run: dotnet build Pz.Connector.Kafka.slnx -c Release
       - run: dotnet test Pz.Connector.Kafka.slnx -c Release --no-build --blame-hang --blame-hang-timeout 10m --blame-hang-dump-type mini
       # One self-contained single-file publish per RID the package ships; pack collects them all
