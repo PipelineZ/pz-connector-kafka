@@ -17,7 +17,7 @@ public sealed class KafkaConnectorTests
     [Fact]
     public void Declares_exactly_sync_state_and_reports_stats()
     {
-        Assert.Equal(ConnectorCapabilities.SyncState | ConnectorCapabilities.ReportsStats, new KafkaConnector().Capabilities);
+        Assert.Equal(ConnectorCapabilities.SyncState | ConnectorCapabilities.ReportsStats | ConnectorCapabilities.NestedTypes, new KafkaConnector().Capabilities);
     }
 
     [Fact]

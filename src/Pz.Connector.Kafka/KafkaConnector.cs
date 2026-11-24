@@ -32,7 +32,7 @@ public sealed class KafkaConnector : IConnector, ISourceConnector, ISinkConnecto
             ?? "0.0.0",
         ProtocolVersion.Major);
 
-    public ConnectorCapabilities Capabilities => ConnectorCapabilities.SyncState | ConnectorCapabilities.ReportsStats;
+    public ConnectorCapabilities Capabilities => ConnectorCapabilities.SyncState | ConnectorCapabilities.ReportsStats | ConnectorCapabilities.NestedTypes;
 
     public string ConnectionConfigSchema => """
         { "type": "object", "required": ["bootstrap_servers"], "properties": {

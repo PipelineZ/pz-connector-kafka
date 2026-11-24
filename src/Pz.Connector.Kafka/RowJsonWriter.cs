@@ -4,6 +4,7 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using Apache.Arrow;
 using Apache.Arrow.Types;
+using Pz.Connectors.Abstractions.Batches;
 
 namespace Pz.Connector.Kafka;
 
@@ -46,6 +47,9 @@ internal sealed class RowJsonWriter(Schema schema, IReadOnlyList<int> columns)
                         if (double.IsFinite(d)) writer.WriteNumberValue(d); else writer.WriteNullValue();
                         break;
                     case BooleanArray a: writer.WriteBooleanValue(a.GetValue(row)!.Value); break;
+                    case StructArray or ListArray or FixedSizeListArray or MapArray:
+                        ArrowCell.WriteJson(writer, column, row);
+                        break;
                     default: writer.WriteStringValue(ArrowScalars.Format(column, row)); break;
                 }
             }

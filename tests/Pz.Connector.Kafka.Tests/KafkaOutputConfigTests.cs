@@ -118,4 +118,37 @@ public sealed class KafkaOutputConfigTests
         Assert.Contains(errors, e => e.Contains("'headers'") && e.Contains("missing"));
         Assert.Contains(errors, e => e.Contains("'headers'") && e.Contains("amount"));
     }
+
+    private static readonly Schema NestedSchema = new(
+    [
+        new Field("id", Int64Type.Default, true),
+        new Field("rec", new StructType([new Field("n", Int32Type.Default, true)]), true),
+        new Field("tags", new ListType(new Field("item", StringType.Default, true)), true),
+    ], null);
+
+    [Fact]
+    public void Nested_columns_are_accepted_in_the_record_value()
+    {
+        var errors = new List<string>();
+        var config = KafkaOutputConfig.Parse(Spec(new() { ["key"] = "id" }), errors)!;
+
+        config.ValidateAgainst("order-events", NestedSchema, errors);
+
+        Assert.Empty(errors);
+    }
+
+    [Fact]
+    public void A_nested_key_or_header_column_is_refused_naming_the_column()
+    {
+        var errors = new List<string>();
+        var config = KafkaOutputConfig.Parse(Spec(new()
+        {
+            ["key"] = "rec", ["headers"] = new List<object?> { "tags" },
+        }), errors)!;
+
+        config.ValidateAgainst("order-events", NestedSchema, errors);
+
+        Assert.Contains(errors, e => e.Contains("'key'") && e.Contains("'rec'") && e.Contains("must be a flat value"));
+        Assert.Contains(errors, e => e.Contains("'headers'") && e.Contains("'tags'") && e.Contains("must be a flat value"));
+    }
 }
