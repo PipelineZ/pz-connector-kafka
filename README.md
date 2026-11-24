@@ -102,16 +102,17 @@ A feed dataset paired with an `append` output needs `duplicates: accept` on that
 
 Without `value:`, each row becomes a JSON object of every column not named in `key:` or
 `headers:`: integers and doubles as numbers, decimals as strings (every digit of a 38-digit
-value), booleans, dates as `yyyy-MM-dd`, timestamps as `yyyy-MM-ddTHH:mm:ss.ffffffZ`, nulls as
+value), booleans, structs and maps as JSON objects, lists as JSON arrays, dates as `yyyy-MM-dd`, timestamps as `yyyy-MM-ddTHH:mm:ss.ffffffZ`, nulls as
 `null`. The producer is idempotent with `acks=all`; commit flushes and fails if any record was not
 acknowledged. Delivery across runs is at-least-once, as for every `append` output. The topic must
 already exist.
 
 A row whose `value:` column is null produces a record with a null value -- on a compacted topic that
 is a tombstone, deleting the key, not a skipped row. Without `value:`, the whole-row JSON carries
-only pz's type matrix -- varchar, integer, bigint, double, decimal, boolean, date, timestamp -- and a
+only pz's type matrix -- varchar, integer, bigint, double, decimal, boolean, date, timestamp, and struct, list and map of those -- and a
 column of any other type is refused when the write starts, before a record is produced, naming the
-column: name a `value:` column, or drop it from the pipeline's projection.
+column: name a `value:` column, or drop it from the pipeline's projection. A `key:` or `headers:`
+column must be a flat value: a struct, list or map there is refused, naming the column.
 
 ## Development
 

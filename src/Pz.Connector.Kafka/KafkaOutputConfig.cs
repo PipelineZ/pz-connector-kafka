@@ -24,7 +24,11 @@ internal sealed record KafkaOutputConfig(
     [
         ArrowTypeId.String, ArrowTypeId.Int32, ArrowTypeId.Int64, ArrowTypeId.Double,
         ArrowTypeId.Decimal128, ArrowTypeId.Boolean, ArrowTypeId.Date32, ArrowTypeId.Timestamp,
+        ArrowTypeId.Struct, ArrowTypeId.List, ArrowTypeId.FixedSizeList, ArrowTypeId.Map,
     ];
+
+    private static readonly ArrowTypeId[] NestedTypeIds =
+        [ArrowTypeId.Struct, ArrowTypeId.List, ArrowTypeId.FixedSizeList, ArrowTypeId.Map];
 
     public static KafkaOutputConfig? Parse(OutputSpec spec, List<string> errors)
     {
@@ -177,6 +181,11 @@ internal sealed record KafkaOutputConfig(
         if (field is null)
         {
             errors.Add($"{prefix}: '{option}' names column '{column}', which the pipeline does not produce");
+        }
+        else if (NestedTypeIds.Contains(field.DataType.TypeId))
+        {
+            errors.Add($"{prefix}: '{option}' column '{column}' is {field.DataType.TypeId}; a {option} must be a flat value "
+                + "(a nested column is only carried inside the record value's JSON). Cast it to varchar, or pick a flat column");
         }
         else if (!allowed.Contains(field.DataType.TypeId))
         {

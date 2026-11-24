@@ -32,6 +32,8 @@ public sealed class KafkaSinkAcceptance : SinkConnectorAcceptanceTests
 
     protected override OutputSpec SmallOutput => new("kafka", _topic, "append", "fail_on_change", new Dictionary<string, object?>());
 
+    protected override OutputSpec? NestedOutput => new("kafka", _topic, "append", "fail_on_change", new Dictionary<string, object?>());
+
     protected override async ValueTask<IReadOnlyList<RecordBatch>> ReadCommittedAsync(ISinkConnector connector, OutputSpec spec)
     {
         var records = await _broker.ConsumeAllAsync(spec.Output);

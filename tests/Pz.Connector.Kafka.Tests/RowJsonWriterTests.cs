@@ -84,4 +84,26 @@ public sealed class RowJsonWriterTests
         Assert.Null(ArrowScalars.Bytes(batch.Column(4), 1));
         Assert.Equal(Encoding.UTF8.GetBytes("7"), ArrowScalars.Bytes(batch.Column(0), 0));
     }
+
+    [Fact]
+    public void Nested_columns_write_as_json_objects_and_arrays_with_nulls_at_every_level()
+    {
+        var tags = new ListArray.Builder(StringType.Default);
+        var tagValues = (StringArray.Builder)tags.ValueBuilder;
+        tags.Append(); tagValues.Append("a"); tagValues.AppendNull();
+        tags.AppendNull();
+        var recType = new StructType([
+            new Field("n", Int32Type.Default, true),
+            new Field("tags", new ListType(new Field("item", StringType.Default, true)), true),
+        ]);
+        var rec = new StructArray(recType, 2,
+            [new Int32Array.Builder().Append(7).AppendNull().Build(), tags.Build()],
+            new ArrowBuffer.BitmapBuilder().Append(true).Append(false).Build(), nullCount: 1);
+        var schema = new Schema([new Field("rec", recType, true)], null);
+        using var batch = new RecordBatch(schema, [rec], 2);
+        var writer = new RowJsonWriter(schema, [0]);
+
+        Assert.Equal("""{"rec":{"n":7,"tags":["a",null]}}""", Encoding.UTF8.GetString(writer.Write(batch, 0)));
+        Assert.Equal("""{"rec":null}""", Encoding.UTF8.GetString(writer.Write(batch, 1)));
+    }
 }
